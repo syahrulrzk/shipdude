@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShipDude - Premium DevOps Portal</title>
+    <!-- Tailwind CSS Play CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        slate: {
+                            950: '#070a13',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Modern Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen p-8 relative overflow-x-hidden">
+    
+    <!-- Background glowing mesh orbs -->
+    <div class="absolute inset-0 z-[-1] overflow-hidden pointer-events-none">
+        <div class="absolute w-[500px] h-[500px] rounded-full bg-blue-500/10 blur-[120px] top-[-100px] right-[-100px]"></div>
+        <div class="absolute w-[600px] h-[600px] rounded-full bg-purple-500/10 blur-[150px] bottom-[-200px] left-[-150px]"></div>
+    </div>
+
+    <div class="max-w-6xl mx-auto">
+        <header class="text-center mb-12">
+            <div class="inline-flex items-center gap-3 mb-3">
+                <span class="text-4xl animate-[sway_3s_ease-in-out_infinite]">🚢</span>
+                <h1 class="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-white via-white to-blue-400 bg-clip-text text-transparent">
+                    Ship<span class="bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Dude</span>
+                </h1>
+            </div>
+            <p class="text-slate-400 text-lg font-light">Self-hosted, stateless DevOps orchestrator. Phase 1 Verification.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- VPS Connector Card -->
+            <section class="bg-white/[0.03] backdrop-blur-md border border-white/5 rounded-3xl p-8 shadow-2xl hover:border-white/10 transition-all duration-300">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="text-2xl">⚡</span>
+                    <h2 class="text-xl font-semibold tracking-tight">VPS Connector Prober</h2>
+                </div>
+                <form id="vps-form" onsubmit="event.preventDefault();" class="space-y-5">
+                    <div class="flex gap-4">
+                        <div class="flex-[3]">
+                            <label for="ip_address" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">VPS Host IP</label>
+                            <input type="text" id="ip_address" placeholder="e.g. 103.187.22.44" required
+                                class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200">
+                        </div>
+                        <div class="flex-[1] min-w-[90px]">
+                            <label for="ssh_port" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">SSH Port</label>
+                            <input type="number" id="ssh_port" value="22" required
+                                class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="ssh_user" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">SSH Username</label>
+                        <input type="text" id="ssh_user" value="root" required
+                            class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200">
+                    </div>
+
+                    <div>
+                        <label for="auth_method" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Auth Method</label>
+                        <select id="auth_method" onchange="toggleAuthFields()"
+                            class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200">
+                            <option value="password">Password</option>
+                            <option value="key">SSH Private Key</option>
+                        </select>
+                    </div>
+
+                    <div id="password-group">
+                        <label for="password" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">SSH Password</label>
+                        <input type="password" id="password" placeholder="Enter root or deployer password"
+                            class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200">
+                    </div>
+
+                    <div id="key-group" class="hidden">
+                        <label for="private_key" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">SSH Private Key</label>
+                        <textarea id="private_key" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+                            class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 font-mono text-xs p-4 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200 resize-y"></textarea>
+                    </div>
+
+                    <button type="button" class="w-full bg-blue-500 hover:bg-blue-600 active:scale-[0.98] text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all duration-300" onclick="probeVPS()">
+                        <span>Test Connection & Probe</span>
+                        <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="vps-spinner"></div>
+                    </button>
+                </form>
+
+                <!-- VPS Diagnostics Output -->
+                <div class="mt-8 border-t border-white/5 pt-6 hidden" id="vps-diagnostics">
+                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">VPS Diagnostic Results</h3>
+                    <ul class="space-y-3">
+                        <li id="vps-status-connected" class="flex justify-between items-center py-1">
+                            <span class="text-sm text-slate-400">Status Connection</span>
+                            <span class="val px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase bg-amber-500/10 text-amber-400 border border-amber-500/20">Checking...</span>
+                        </li>
+                        <li id="vps-status-os" class="flex justify-between items-center py-1">
+                            <span class="text-sm text-slate-400">OS Distribution</span>
+                            <span class="val font-semibold text-slate-200">Checking...</span>
+                        </li>
+                        <li id="vps-status-docker" class="flex justify-between items-center py-1">
+                            <span class="text-sm text-slate-400">Docker Version</span>
+                            <span class="val font-semibold text-slate-200">Checking...</span>
+                        </li>
+                        <li id="vps-status-compose" class="flex justify-between items-center py-1">
+                            <span class="text-sm text-slate-400">Docker Compose</span>
+                            <span class="val font-semibold text-slate-200">Checking...</span>
+                        </li>
+                        <li id="vps-status-sudo" class="flex justify-between items-center py-1">
+                            <span class="text-sm text-slate-400">Passwordless Sudo</span>
+                            <span class="val font-semibold text-slate-200">Checking...</span>
+                        </li>
+                        <li id="vps-status-group" class="flex justify-between items-center py-1">
+                            <span class="text-sm text-slate-400">In Docker Group</span>
+                            <span class="val font-semibold text-slate-200">Checking...</span>
+                        </li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Stack Discovery Card -->
+            <section class="bg-white/[0.03] backdrop-blur-md border border-white/5 rounded-3xl p-8 shadow-2xl hover:border-white/10 transition-all duration-300">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="text-2xl">🔍</span>
+                    <h2 class="text-xl font-semibold tracking-tight">Remote Stack Discovery</h2>
+                </div>
+                <form id="github-form" onsubmit="event.preventDefault();" class="space-y-5">
+                    <div>
+                        <label for="github_repo" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">GitHub Repository</label>
+                        <input type="text" id="github_repo" placeholder="e.g. username/repository" required
+                            class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all duration-200">
+                    </div>
+
+                    <div>
+                        <label for="github_token" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">GitHub OAuth/PAT Token <span class="normal-case opacity-60">(Optional)</span></label>
+                        <input type="password" id="github_token" placeholder="Optional for public repositories"
+                            class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all duration-200">
+                    </div>
+
+                    <button type="button" class="w-full bg-purple-500 hover:bg-purple-600 active:scale-[0.98] text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2 transition-all duration-300" onclick="detectStack()">
+                        <span>Analyze Tech Stack</span>
+                        <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="git-spinner"></div>
+                    </button>
+                </form>
+
+                <!-- Stack Detection Output -->
+                <div class="mt-8 border-t border-white/5 pt-6 hidden" id="git-diagnostics">
+                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Detected Tech Stack Profile</h3>
+                    <div class="bg-slate-900/40 border border-white/5 rounded-2xl p-5">
+                        <div class="flex items-center gap-4 mb-4 border-b border-white/5 pb-4">
+                            <div class="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-center text-lg font-bold text-blue-400 transition-colors" id="tech-logo-char">?</div>
+                            <div>
+                                <h4 class="text-md font-semibold capitalize text-slate-200" id="tech-language">Unknown</h4>
+                                <p class="text-slate-400 text-xs mt-0.5" id="tech-version">Version: latest</p>
+                            </div>
+                        </div>
+                        <ul class="space-y-3">
+                            <li class="flex justify-between items-center text-sm">
+                                <span class="text-slate-400">Default Container Port</span>
+                                <span class="val font-semibold text-slate-200" id="tech-port">80</span>
+                            </li>
+                            <li class="flex justify-between items-center text-sm">
+                                <span class="text-slate-400">Detected Meta Files</span>
+                                <span class="val font-semibold text-slate-200 font-mono text-xs bg-white/[0.04] px-2 py-1 rounded" id="tech-files">-</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Floating Toasts -->
+    <div id="toast-container" class="fixed bottom-8 right-8 z-50 flex flex-col gap-3"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

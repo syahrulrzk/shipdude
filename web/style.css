@@ -1,0 +1,8 @@
+@keyframes sway {
+    0%, 100% { transform: rotate(0deg) translateY(0); }
+    50% { transform: rotate(4deg) translateY(-4px); }
+}
+
+.animate-sway {
+    animation: sway 3s ease-in-out infinite;
+}
