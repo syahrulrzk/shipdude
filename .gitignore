@@ -1,0 +1,33 @@
+# Database & Secrets
+config/shipdude.db
+config/shipdude.db-journal
+config/shipdude.db-shm
+config/shipdude.db-wal
+config/encryption.key
+.env
+.env.*
+
+# Go Compiled Binaries
+shipdude
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# Operating System Files
+.DS_Store
+Thumbs.db

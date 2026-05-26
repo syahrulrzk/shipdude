@@ -38,15 +38,48 @@
     </div>
 
     <div class="max-w-6xl mx-auto">
-        <header class="text-center mb-12">
+        <header class="relative text-center mb-12">
+            <!-- Top Right Settings Cog -->
+            <button onclick="toggleSettingsModal(true)" class="absolute right-0 top-1/2 -translate-y-1/2 bg-white/5 hover:bg-white/10 active:scale-95 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl border border-white/5 transition-all duration-200 flex items-center gap-2 text-xs font-semibold shadow-lg">
+                ⚙️ <span>GitHub Integration</span>
+            </button>
+
             <div class="inline-flex items-center gap-3 mb-3">
                 <span class="text-4xl animate-[sway_3s_ease-in-out_infinite]">🚢</span>
                 <h1 class="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-white via-white to-blue-400 bg-clip-text text-transparent">
                     Ship<span class="bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Dude</span>
                 </h1>
             </div>
-            <p class="text-slate-400 text-lg font-light">Self-hosted, stateless DevOps orchestrator. Phase 1 Verification.</p>
+            <p class="text-slate-400 text-lg font-light">Self-hosted, stateless DevOps orchestrator. Phase 2 Activated.</p>
+            
+            <div id="github-connection-status" class="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white/5 border border-white/5 text-slate-400 transition-all duration-300">
+                <span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse" id="github-status-dot"></span>
+                <span id="github-status-text">Checking GitHub Connection...</span>
+                <button id="github-disconnect-btn" onclick="disconnectGitHub()" class="hidden ml-2 text-rose-400 hover:text-rose-300 font-bold hover:underline active:scale-95 transition-all focus:outline-none">Disconnect</button>
+            </div>
         </header>
+
+        <!-- Unconfigured Alert Banner -->
+        <div id="github-unconfigured-banner" class="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-5 mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 hidden">
+            <div>
+                <h4 class="text-amber-400 font-semibold text-sm">GitHub credentials missing</h4>
+                <p class="text-slate-400 text-xs mt-0.5">You must configure a GitHub OAuth Client ID and Secret to enable logins and auto-discovery.</p>
+            </div>
+            <button onclick="toggleSettingsModal(true)" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-xs px-4 py-2 rounded-xl transition-all">
+                Configure Now
+            </button>
+        </div>
+
+        <!-- GitHub Connection Status Card -->
+        <div id="github-oauth-prompt" class="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-6 mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 hidden">
+            <div>
+                <h4 class="text-purple-400 font-semibold text-sm">Connect GitHub Account</h4>
+                <p class="text-slate-400 text-xs mt-0.5">Authorizing ShipDude allows you to search repositories, automatically inject deployment SSH keys, and commit pipelines.</p>
+            </div>
+            <a href="/api/v1/auth/github" class="bg-purple-500 hover:bg-purple-600 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-purple-500/20 transition-all text-center">
+                🔗 Authorize GitHub
+            </a>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
             <!-- VPS Connector Card -->
@@ -96,10 +129,15 @@
                             class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 font-mono text-xs p-4 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200 resize-y"></textarea>
                     </div>
 
-                    <button type="button" class="w-full bg-blue-500 hover:bg-blue-600 active:scale-[0.98] text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all duration-300" onclick="probeVPS()">
-                        <span>Test Connection & Probe</span>
-                        <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="vps-spinner"></div>
-                    </button>
+                    <div class="flex gap-3">
+                        <button type="button" class="flex-[2] bg-blue-500 hover:bg-blue-600 active:scale-[0.98] text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all duration-300" onclick="probeVPS()">
+                            <span>Test Connection & Probe</span>
+                            <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="vps-spinner"></div>
+                        </button>
+                        <button type="button" class="flex-1 bg-white/5 hover:bg-white/10 active:scale-[0.98] text-slate-200 font-semibold py-3.5 rounded-xl border border-white/5 transition-all duration-300 flex items-center justify-center gap-2" onclick="saveVPSConnectionManual()">
+                            <span>💾 Save</span>
+                        </button>
+                    </div>
                 </form>
 
                 <!-- VPS Diagnostics Output -->
@@ -141,13 +179,16 @@
                     <h2 class="text-xl font-semibold tracking-tight">Remote Stack Discovery</h2>
                 </div>
                 <form id="github-form" onsubmit="event.preventDefault();" class="space-y-5">
-                    <div>
+                    <div class="relative">
                         <label for="github_repo" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">GitHub Repository</label>
-                        <input type="text" id="github_repo" placeholder="e.g. username/repository" required
+                        <input type="text" id="github_repo" placeholder="Type to search e.g. username/repo" required autocomplete="off" oninput="searchRepos(this.value)"
                             class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all duration-200">
+                        <div id="repo-autocomplete" class="absolute left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-xl overflow-hidden shadow-2xl max-h-48 overflow-y-auto z-10 hidden">
+                            <!-- Suggestions populated dynamically -->
+                        </div>
                     </div>
 
-                    <div>
+                    <div id="pat-token-group">
                         <label for="github_token" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">GitHub OAuth/PAT Token <span class="normal-case opacity-60">(Optional)</span></label>
                         <input type="password" id="github_token" placeholder="Optional for public repositories"
                             class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 transition-all duration-200">
@@ -183,6 +224,128 @@
                     </div>
                 </div>
             </section>
+        </div>
+
+        <!-- Deployment Setup Card -->
+        <section id="deploy-card" class="mt-8 bg-white/[0.03] backdrop-blur-md border border-white/5 rounded-3xl p-8 shadow-2xl hover:border-white/10 transition-all duration-300">
+            <div class="flex items-center gap-3 mb-6">
+                <span class="text-2xl">🚀</span>
+                <h2 class="text-xl font-semibold tracking-tight">Configure Deployment & Setup Auto CI/CD</h2>
+            </div>
+            
+            <form id="deploy-form" onsubmit="event.preventDefault(); triggerDeploy();" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Left Column: Copy values / details -->
+                <div class="space-y-5">
+                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider border-b border-white/5 pb-2">Target Node Configuration</h3>
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider">Host & Connection Details</label>
+                            <button type="button" onclick="copyVPSDetails()" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">⚡ Copy from Prober</button>
+                        </div>
+                        <div class="grid grid-cols-3 gap-3">
+                            <input type="text" id="deploy_ip" placeholder="IP Address" required class="col-span-2 bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-blue-500">
+                            <input type="number" id="deploy_port" placeholder="Port" value="22" required class="bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Username</label>
+                            <input type="text" id="deploy_user" placeholder="root" required class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Auth Method</label>
+                            <select id="deploy_auth_method" onchange="toggleDeployAuthFields()" class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-blue-500">
+                                <option value="password">Password</option>
+                                <option value="key">SSH Private Key</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="deploy-password-group">
+                        <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">SSH Password</label>
+                        <input type="password" id="deploy_password" placeholder="Enter SSH Password" class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div id="deploy-key-group" class="hidden">
+                        <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">SSH Private Key</label>
+                        <textarea id="deploy_private_key" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 font-mono text-xs p-3.5 focus:outline-none focus:border-blue-500 resize-y"></textarea>
+                    </div>
+                </div>
+
+                <!-- Right Column: Git Repository and Port mapping -->
+                <div class="space-y-5">
+                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider border-b border-white/5 pb-2">Application Properties</h3>
+                    
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2">
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Deploy Project Name</label>
+                            <input type="text" id="deploy_project_name" placeholder="my-app" required class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Git Branch</label>
+                            <select id="deploy_branch" required class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-purple-500">
+                                <option value="main">main</option>
+                                <option value="master">master</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Remote Deployment Folder Path</label>
+                        <input type="text" id="deploy_path" placeholder="e.g. /var/www/my-app" required class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-purple-500">
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2">
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Detected Tech Stack</label>
+                            <input type="text" id="deploy_stack_info" placeholder="Detect from repository" readonly class="w-full bg-slate-900/30 border border-white/5 rounded-xl text-slate-400 text-sm px-4 py-2.5 focus:outline-none cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Docker Port</label>
+                            <input type="number" id="deploy_port_val" placeholder="8080" required class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-purple-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Submit Section across all columns -->
+                <div class="col-span-1 md:col-span-2 pt-4">
+                    <button type="submit" class="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 active:scale-[0.98] text-white font-semibold py-4 rounded-xl shadow-xl shadow-blue-500/10 flex items-center justify-center gap-2 transition-all duration-300">
+                        <span>🚀 Bootstrap Deployment & Setup Auto-CI/CD</span>
+                        <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="deploy-spinner"></div>
+                    </button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm hidden">
+        <div class="bg-slate-900 border border-white/5 rounded-3xl p-8 max-w-md w-full shadow-2xl space-y-6 mx-4">
+            <div>
+                <h3 class="text-xl font-bold text-slate-100">GitHub Credentials</h3>
+                <p class="text-xs text-slate-400 mt-1">Configure your GitHub OAuth application credentials to enable automated repository deployment and CI/CD pipelines.</p>
+            </div>
+            <form id="settings-form" class="space-y-4" onsubmit="event.preventDefault(); saveSettings();">
+                <div>
+                    <label for="settings_client_id" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">OAuth Client ID</label>
+                    <input type="text" id="settings_client_id" required placeholder="Paste your GitHub OAuth Client ID"
+                        class="w-full bg-slate-950/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200">
+                </div>
+                <div>
+                    <label for="settings_client_secret" class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">OAuth Client Secret</label>
+                    <input type="password" id="settings_client_secret" required placeholder="Paste your GitHub OAuth Client Secret"
+                        class="w-full bg-slate-950/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200">
+                </div>
+                <div class="flex gap-3 pt-2">
+                    <button type="button" class="flex-1 bg-white/5 hover:bg-white/10 active:scale-[0.98] text-slate-200 font-semibold py-3 rounded-xl transition-all" onclick="toggleSettingsModal(false)">
+                        Cancel
+                    </button>
+                    <button type="submit" class="flex-1 bg-blue-500 hover:bg-blue-600 active:scale-[0.98] text-white font-semibold py-3 rounded-xl transition-all">
+                        Save Configuration
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 

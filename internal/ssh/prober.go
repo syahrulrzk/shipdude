@@ -147,3 +147,60 @@ func parseOSRelease(output string) string {
 	}
 	return "Generic Linux"
 }
+
+// AddAuthorizedKey appends a public SSH key to the target server's authorized_keys file
+func AddAuthorizedKey(creds ProbeCredentials, pubKey string) error {
+	var authMethods []ssh.AuthMethod
+
+	if creds.AuthMethod == "password" {
+		authMethods = append(authMethods, ssh.Password(creds.Password))
+	} else if creds.AuthMethod == "key" {
+		signer, err := ssh.ParsePrivateKey([]byte(creds.PrivateKey))
+		if err != nil {
+			return fmt.Errorf("failed to parse private key: %w", err)
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	} else {
+		return fmt.Errorf("unsupported auth method: %s", creds.AuthMethod)
+	}
+
+	config := &ssh.ClientConfig{
+		User:            creds.User,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	addr := fmt.Sprintf("%s:%d", creds.IPAddress, creds.Port)
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect via SSH: %w", err)
+	}
+	defer conn.Close()
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
+	if err != nil {
+		return fmt.Errorf("failed to initialize SSH handshake: %w", err)
+	}
+	client := ssh.NewClient(sshConn, chans, reqs)
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	// Ensure .ssh dir exists and append key safely
+	cleanPubKey := strings.TrimSpace(pubKey)
+	cmd := fmt.Sprintf("mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys", cleanPubKey)
+
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+	if err := session.Run(cmd); err != nil {
+		return fmt.Errorf("failed to execute append command: %v (stderr: %s)", err, stderr.String())
+	}
+
+	return nil
+}
+

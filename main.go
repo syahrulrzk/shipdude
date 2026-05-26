@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"shipdude/internal/db"
 	"shipdude/internal/server"
 )
 
@@ -18,8 +19,15 @@ func main() {
 		log.Fatalf("failed to locate embedded static assets sub-directory: %v", err)
 	}
 
+	// Initialize SQLite Database Store
+	dbStore, err := db.NewStore("./config/shipdude.db")
+	if err != nil {
+		log.Fatalf("failed to initialize database: %v", err)
+	}
+	defer dbStore.Close()
+
 	staticHandler := http.FileServer(http.FS(subFS))
-	router := server.SetupRouter(staticHandler)
+	router := server.SetupRouter(staticHandler, dbStore)
 
 	port := ":8080"
 	log.Printf("=============================================")
