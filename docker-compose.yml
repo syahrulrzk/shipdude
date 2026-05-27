@@ -1,0 +1,12 @@
+services:
+  shipdude:
+    image: user4xn/shipdude:latest
+    container_name: shipdude
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - shipdude-config:/app/config
+
+volumes:
+  shipdude-config:

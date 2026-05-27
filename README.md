@@ -37,7 +37,50 @@ No cloud vendor lock-in. No monthly fees. Your infrastructure, your rules.
 
 ---
 
-## 🚀 Quick Start
+## 🐳 Install via Docker Hub (Recommended)
+
+The easiest way to run ShipDude. No Go installation required.
+
+**1. Create a `docker-compose.yml`:**
+
+```yaml
+services:
+  shipdude:
+    image: user4xn/shipdude:latest
+    container_name: shipdude
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - shipdude-config:/app/config
+
+volumes:
+  shipdude-config:
+```
+
+**2. Start it:**
+
+```bash
+docker compose up -d
+```
+
+**3. Open your browser:**
+
+```
+http://localhost:8080
+```
+
+Your configuration (SQLite database, credentials) is persisted in the `shipdude-config` named volume. It survives container restarts and updates.
+
+**Updating to a new version:**
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+---
+
+## 🚀 Quick Start (Build from Source)
 
 ### Run from source
 
