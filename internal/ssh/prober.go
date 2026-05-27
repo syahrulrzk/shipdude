@@ -18,6 +18,7 @@ type Diagnostics struct {
 	ComposeVersion string `json:"compose_version"`
 	HasSudo        bool   `json:"has_sudo"`
 	InDockerGroup  bool   `json:"in_docker_group"`
+	Bootstrapped   bool   `json:"bootstrapped"`
 	Error          string `json:"error,omitempty"`
 }
 
@@ -102,6 +103,15 @@ func RunDiagnostics(creds ProbeCredentials) (*Diagnostics, error) {
 
 	sudoOut, err := runCommand(client, "sudo -n true")
 	diag.HasSudo = (err == nil && !strings.Contains(sudoOut, "sudo: a password is required"))
+
+	// 5. Check if already bootstrapped (has deployer user and shipdude-caddy container exists)
+	deployerCheck, err := runCommand(client, "id -u deployer")
+	hasDeployer := err == nil && strings.TrimSpace(deployerCheck) != ""
+
+	caddyCheck, err := runCommand(client, "docker ps -a --filter 'name=shipdude-caddy' --format '{{.Names}}'")
+	hasCaddy := err == nil && strings.Contains(caddyCheck, "shipdude-caddy")
+
+	diag.Bootstrapped = hasDeployer && hasCaddy
 
 	return diag, nil
 }

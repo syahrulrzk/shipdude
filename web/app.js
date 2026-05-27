@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadLastVPSConnection();
     setupPrivateKeyMasking('private_key');
     setupPrivateKeyMasking('deploy_private_key');
+    loadProjects();
 });
 
 function toggleAuthFields() {
@@ -257,6 +258,9 @@ async function probeVPS() {
     updateField('vps-status-compose', 'Checking...', 'font-semibold text-slate-400');
     updateField('vps-status-sudo', 'Checking...', 'font-semibold text-slate-400');
     updateField('vps-status-group', 'Checking...', 'font-semibold text-slate-400');
+    updateField('vps-status-bootstrapped', 'Checking...', 'font-semibold text-slate-400');
+    const bootBadge = document.getElementById('bootstrap-status-badge');
+    if (bootBadge) bootBadge.classList.add('hidden');
 
     try {
         const payload = {
@@ -295,6 +299,14 @@ async function probeVPS() {
 
             updateField('vps-status-sudo', result.has_sudo ? 'Granted' : 'Denied', result.has_sudo ? 'font-semibold text-emerald-400' : 'font-semibold text-rose-400');
             updateField('vps-status-group', result.in_docker_group ? 'Yes' : 'No', result.in_docker_group ? 'font-semibold text-emerald-400' : 'font-semibold text-rose-400');
+            updateField('vps-status-bootstrapped', result.bootstrapped ? 'Ready (Existing)' : 'Not Found', result.bootstrapped ? 'font-semibold text-emerald-400' : 'font-semibold text-amber-400');
+            if (bootBadge) {
+                if (result.bootstrapped) {
+                    bootBadge.classList.remove('hidden');
+                } else {
+                    bootBadge.classList.add('hidden');
+                }
+            }
             showToast('VPS Connection & Diagnostics successfully completed!', 'success');
         } else {
             updateField('vps-status-connected', 'Failed', 'px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase bg-rose-500/10 text-rose-400 border border-rose-500/25');
@@ -303,6 +315,8 @@ async function probeVPS() {
             updateField('vps-status-compose', '-', 'font-semibold text-slate-400');
             updateField('vps-status-sudo', '-', 'font-semibold text-slate-400');
             updateField('vps-status-group', '-', 'font-semibold text-slate-400');
+            updateField('vps-status-bootstrapped', '-', 'font-semibold text-slate-400');
+            if (bootBadge) bootBadge.classList.add('hidden');
             showToast('Connection failed: ' + (result.error || 'Unreachable'), 'error');
         }
     } catch (err) {
@@ -462,9 +476,10 @@ async function triggerDeploy() {
             throw new Error(result.error || 'Failed to deploy project');
         }
 
-        showToast('Deployment configured & auto CI/CD setup success!', 'success');
+        showToast('Deployment config pipeline started!', 'success');
+        openTerminal('deploy', payload.project_name);
     } catch (err) {
-        showToast('Deployment failed: ' + err.message, 'error');
+        showToast('Deployment configuration failed: ' + err.message, 'error');
     } finally {
         btn.disabled = false;
         spinner.classList.add('hidden');
@@ -591,36 +606,7 @@ async function disconnectGitHub() {
     }
 }
 
-async function fetchBranches(repo, defaultBranch = 'main') {
-    if (!repo) return;
-    try {
-        const response = await fetch(`/api/v1/github/branches?repo=${encodeURIComponent(repo)}`);
-        if (!response.ok) {
-            throw new Error('Failed to fetch branches');
-        }
-        const branches = await response.json();
-        const select = document.getElementById('deploy_branch');
-        if (!select) return;
-        
-        select.innerHTML = '';
-        branches.forEach(b => {
-            const opt = document.createElement('option');
-            opt.value = b.name;
-            opt.textContent = b.name;
-            select.appendChild(opt);
-        });
 
-        // Try to select defaultBranch if it exists in the list
-        const hasDefault = branches.some(b => b.name === defaultBranch);
-        if (hasDefault) {
-            select.value = defaultBranch;
-        } else if (branches.length > 0) {
-            select.value = branches[0].name;
-        }
-    } catch (err) {
-        console.error('Failed to load branches:', err);
-    }
-}
 
 async function fetchBranches(repo, defaultBranch = 'main') {
     if (!repo) return;
@@ -699,4 +685,266 @@ function setPrivateKeyVal(elementId, val) {
             el.value = '';
         }
     }
+}
+
+let ws = null;
+
+async function loadProjects() {
+    try {
+        const response = await fetch('/api/v1/projects');
+        if (!response.ok) {
+            throw new Error('Failed to load projects');
+        }
+        const projects = await response.json();
+        const container = document.getElementById('projects-list-container');
+        if (!container) return;
+
+        if (!projects || projects.length === 0) {
+            container.innerHTML = `<p class="col-span-1 md:col-span-2 text-slate-400 text-sm italic">No active projects registered. Use the configuration form above to launch your first deployment.</p>`;
+            return;
+        }
+
+        container.innerHTML = '';
+        projects.forEach(p => {
+            const cleanName = p.project_name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const domain = p.domain || `${cleanName}.${p.server_ip || 'vps'}.sslip.io`;
+            const image = p.active_image || 'No deployment active';
+            const port = p.active_port || 'None';
+
+            const card = document.createElement('div');
+            card.className = 'bg-white/[0.02] border border-white/5 rounded-2xl p-6 hover:border-white/10 transition-all duration-300 flex flex-col justify-between';
+            card.innerHTML = `
+                <div>
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h3 class="text-md font-bold text-slate-100">${p.project_name}</h3>
+                            <p class="text-xs text-slate-400 mt-0.5">${p.github_repo} (${p.github_branch})</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase ${p.active_port ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-white/5'}">
+                                ${p.active_port ? 'Active' : 'Configured'}
+                            </span>
+                            <button onclick="deleteProject(${p.id})" title="Delete Project Config" class="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 active:scale-95 transition-all">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <ul class="space-y-2.5 text-xs text-slate-300">
+                        <li class="flex justify-between py-1 border-b border-white/[0.03]">
+                            <span class="text-slate-400">Target Ingress Inbound</span>
+                            <a href="http://${domain}" target="_blank" class="text-blue-400 hover:underline hover:text-blue-300 transition-colors font-mono">${domain} ↗</a>
+                        </li>
+                        <li class="flex justify-between py-1 border-b border-white/[0.03]">
+                            <span class="text-slate-400">Upstream Host Port</span>
+                            <span class="font-mono font-semibold">${port}</span>
+                        </li>
+                        <li class="flex justify-between py-1 border-b border-white/[0.03]">
+                            <span class="text-slate-400">Active Container Image</span>
+                            <span class="font-mono text-slate-400 select-all truncate max-w-[200px]" title="${image}">${image}</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-white/5 space-y-4">
+                    <div class="flex gap-2">
+                        <input type="text" id="rollback-image-${p.id}" placeholder="ghcr.io/username/repo:sha-12345" 
+                            class="flex-1 bg-slate-900 border border-white/5 rounded-xl text-xs px-3 py-2 text-slate-100 focus:outline-none focus:border-rose-500 transition-colors">
+                        <button onclick="rollbackProject(${p.id})" class="bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all border border-rose-500/20 active:scale-95">
+                            Rollback
+                        </button>
+                    </div>
+                    
+                    <button onclick="openTerminal('project', ${p.id})" class="w-full bg-white/5 hover:bg-white/10 active:scale-95 text-slate-300 hover:text-white text-xs font-semibold py-2.5 rounded-xl border border-white/5 transition-all flex items-center justify-center gap-1.5 shadow-md">
+                        📺 Open Execution Logs Console
+                    </button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    } catch (err) {
+        console.error('Failed to load projects:', err);
+    }
+}
+
+async function deleteProject(id) {
+    if (!confirm('Are you sure you want to delete this project configuration? This will only remove the configuration from ShipDude, it will not stop or delete any running containers on your VPS.')) {
+        return;
+    }
+    try {
+        const response = await fetch(`/api/v1/projects/${id}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to delete project');
+        }
+        showToast('Project configuration deleted successfully', 'success');
+        loadProjects();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+async function provisionVPSPrompt() {
+    const ip = document.getElementById('ip_address').value.trim();
+    const port = parseInt(document.getElementById('ssh_port').value, 10);
+    const user = document.getElementById('ssh_user').value.trim();
+    const authMethod = document.getElementById('auth_method').value;
+    const password = document.getElementById('password').value;
+    const privateKey = getPrivateKeyVal('private_key');
+
+    if (!ip || !user) {
+        showToast('Please enter VPS Host IP and SSH Username', 'warning');
+        return;
+    }
+
+    if (!confirm('Are you sure you want to provision and bootstrap this VPS? This will install Docker and setup deployment directories.')) {
+        return;
+    }
+
+    const spinner = document.getElementById('provision-spinner');
+    spinner.classList.remove('hidden');
+
+    try {
+        const payload = {
+            ip_address: ip,
+            ssh_port: port,
+            ssh_user: user,
+            auth_method: authMethod
+        };
+
+        if (authMethod === 'password') {
+            payload.password = password;
+        } else {
+            payload.private_key = privateKey;
+        }
+
+        const response = await fetch('/api/v1/vps/provision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || 'Server provisioning initiation failed');
+        }
+
+        showToast('VPS Provisioning started! Streaming logs...', 'success');
+        openTerminal('provision', ip);
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        spinner.classList.add('hidden');
+    }
+}
+
+async function rollbackProject(id) {
+    const imgEl = document.getElementById(`rollback-image-${id}`);
+    const imgVal = imgEl ? imgEl.value.trim() : '';
+
+    if (!imgVal) {
+        showToast('Please enter a target image tag/SHA to rollback', 'warning');
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to deploy image "${imgVal}"?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/v1/projects/${id}/rollback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_image: imgVal })
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || 'Rollback execution failed');
+        }
+
+        showToast('Rollback/Redeployment started! Streaming logs...', 'success');
+        openTerminal('project', id);
+        if (imgEl) imgEl.value = '';
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+function openTerminal(type, idOrIp) {
+    const modal = document.getElementById('terminal-modal');
+    const content = document.getElementById('terminal-content');
+    const title = document.getElementById('terminal-title');
+
+    if (!modal || !content) return;
+
+    modal.classList.remove('hidden');
+    content.innerHTML = '<div class="text-slate-500">// Connecting to server log stream...</div>';
+
+    if (ws) {
+        ws.close();
+    }
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let wsUrl = '';
+
+    if (type === 'provision') {
+        title.textContent = `VPS Provisioning: ${idOrIp}`;
+        wsUrl = `${proto}//${window.location.host}/api/v1/vps/provision/logs?ip=${encodeURIComponent(idOrIp)}`;
+    } else if (type === 'deploy') {
+        title.textContent = `Project Deploy Config: ${idOrIp}`;
+        wsUrl = `${proto}//${window.location.host}/api/v1/projects/deploy/logs?project_name=${encodeURIComponent(idOrIp)}`;
+    } else {
+        title.textContent = `Deployment Console (ID: ${idOrIp})`;
+        wsUrl = `${proto}//${window.location.host}/api/v1/projects/${idOrIp}/logs`;
+    }
+
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+        content.innerHTML += '<div class="text-emerald-500 font-semibold">[Connected] Listening to remote pipeline stream...</div>';
+    };
+
+    ws.onmessage = (event) => {
+        appendTerminalLine(event.data);
+    };
+
+    ws.onclose = (event) => {
+        content.innerHTML += `<div class="text-amber-500 font-semibold">[Disconnected] Stream closed. (Code: ${event.code})</div>`;
+        ws = null;
+        loadProjects(); // Reload projects list to reflect new deployment statuses
+        if (type === 'provision') {
+            probeVPS(); // Auto-refresh VPS diagnostics to show updated status!
+        }
+    };
+
+    ws.onerror = (err) => {
+        content.innerHTML += '<div class="text-rose-500 font-semibold">[Error] Stream connection failed.</div>';
+        console.error(err);
+    };
+}
+
+function closeTerminal() {
+    const modal = document.getElementById('terminal-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+    if (ws) {
+        ws.close();
+        ws = null;
+    }
+}
+
+function appendTerminalLine(text) {
+    const content = document.getElementById('terminal-content');
+    if (!content) return;
+
+    const line = document.createElement('div');
+    line.textContent = text;
+    content.appendChild(line);
+
+    // Keep it scrolled to bottom
+    content.scrollTop = content.scrollHeight;
 }

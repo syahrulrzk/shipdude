@@ -97,6 +97,10 @@ func startMockSSHServer(t *testing.T, hostKey ssh.Signer, user string, password 
 									response = "Docker Compose version v2.24.5\n"
 								} else if strings.Contains(cmd, "groups") {
 									response = "deployer docker admin\n"
+								} else if strings.Contains(cmd, "id -u deployer") {
+									response = "1001\n"
+								} else if strings.Contains(cmd, "docker ps -a --filter 'name=shipdude-caddy'") {
+									response = "shipdude-caddy\n"
 								} else if strings.Contains(cmd, "sudo -n true") {
 									// exit status 0 (no response body needed)
 									response = ""
@@ -168,6 +172,9 @@ func TestRunDiagnostics_Success(t *testing.T) {
 	}
 	if !diags.HasSudo {
 		t.Errorf("Expected HasSudo=true, got false")
+	}
+	if !diags.Bootstrapped {
+		t.Errorf("Expected Bootstrapped=true, got false")
 	}
 }
 

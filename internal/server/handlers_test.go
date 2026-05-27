@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -17,9 +18,12 @@ import (
 	"path/filepath"
 	"shipdude/internal/db"
 	"shipdude/internal/github"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -93,6 +97,20 @@ func startMockSSHServer(t *testing.T, hostKey ssh.Signer, user string, password 
 								cmd := string(req.Payload[4 : 4+req.Payload[3]])
 								if strings.Contains(cmd, "authorized_keys") {
 									ch.Write([]byte("key injected successfully"))
+								} else if strings.Contains(cmd, "cat /etc/os-release") {
+									ch.Write([]byte("PRETTY_NAME=\"Ubuntu 22.04.3 LTS\"\n"))
+								} else if strings.Contains(cmd, "docker --version") {
+									ch.Write([]byte("Docker version 25.0.3\n"))
+								} else if strings.Contains(cmd, "docker compose version") {
+									ch.Write([]byte("Docker Compose version v2.24.5\n"))
+								} else if strings.Contains(cmd, "groups") {
+									ch.Write([]byte("deployer docker admin\n"))
+								} else if strings.Contains(cmd, "id -u deployer") {
+									ch.Write([]byte("1001\n"))
+								} else if strings.Contains(cmd, "docker ps -a --filter 'name=shipdude-caddy'") {
+									ch.Write([]byte("shipdude-caddy\n"))
+								} else if strings.Contains(cmd, "sudo -n true") {
+									// exit status 0 (no response body needed)
 								}
 								req.Reply(true, nil)
 
@@ -246,6 +264,43 @@ func TestHandleDeployProject_FullFlow(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected deployment status 200, got: %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// Wait for background job to finish
+	var logs []string
+	for i := 0; i < 50; i++ {
+		time.Sleep(10 * time.Millisecond)
+		job := ctx.Jobs.GetJob("deploy-my-website")
+		if job != nil {
+			logs = job.GetLogs()
+			hasSuccess := false
+			hasError := false
+			for _, l := range logs {
+				if strings.Contains(l, "Project setup completed successfully") {
+					hasSuccess = true
+				}
+				if strings.Contains(l, "[Error]") {
+					hasError = true
+				}
+			}
+			if hasSuccess || hasError {
+				break
+			}
+		}
+	}
+	success := false
+	for _, l := range logs {
+		if strings.Contains(l, "Project setup completed successfully") {
+			success = true
+			break
+		}
+	}
+	if !success {
+		var last string
+		if len(logs) > 0 {
+			last = logs[len(logs)-1]
+		}
+		t.Fatalf("background deployment job did not finish successfully: last log: %s", last)
 	}
 
 	// 5. Verify database records
@@ -584,6 +639,234 @@ func TestHandleDeployProject_ManualToken(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got: %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// Wait for background job to finish
+	var logs []string
+	for i := 0; i < 50; i++ {
+		time.Sleep(10 * time.Millisecond)
+		job := ctx.Jobs.GetJob("deploy-my-website")
+		if job != nil {
+			logs = job.GetLogs()
+			hasSuccess := false
+			hasError := false
+			for _, l := range logs {
+				if strings.Contains(l, "Project setup completed successfully") {
+					hasSuccess = true
+				}
+				if strings.Contains(l, "[Error]") {
+					hasError = true
+				}
+			}
+			if hasSuccess || hasError {
+				break
+			}
+		}
+	}
+	success := false
+	for _, l := range logs {
+		if strings.Contains(l, "Project setup completed successfully") {
+			success = true
+			break
+		}
+	}
+	if !success {
+		var last string
+		if len(logs) > 0 {
+			last = logs[len(logs)-1]
+		}
+		t.Fatalf("background deployment job did not finish successfully: last log: %s", last)
+	}
+}
+
+func TestHandleListProjects(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "shipdude-list-test")
+	defer os.RemoveAll(tmpDir)
+	store, _ := db.NewStore(filepath.Join(tmpDir, "shipdude.db"))
+	defer store.Close()
+
+	srvID, _ := store.SaveServer(db.Server{
+		Name:      "127.0.0.1",
+		IPAddress: "127.0.0.1",
+		SSHPort:   22,
+		SSHUser:   "root",
+	})
+	store.SaveProject(db.Project{
+		ServerID:       srvID,
+		GitHubRepo:     "user4xn/my-website",
+		GitHubBranch:   "main",
+		ProjectName:    "my-website",
+		DeploymentPath: "/var/www/my-website",
+		StackType:      "go",
+		StackVersion:   "1.23",
+		AppPort:        8080,
+		Domain:         "my-website.com",
+	})
+	
+	ctx := NewServerContext(store)
+	req := httptest.NewRequest("GET", "/api/v1/projects", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleListProjects(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var projects []db.Project
+	if err := json.NewDecoder(w.Body).Decode(&projects); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(projects) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(projects))
+	}
+
+	if projects[0].ProjectName != "my-website" || projects[0].ServerIP != "127.0.0.1" {
+		t.Errorf("unexpected project details: %+v", projects[0])
+	}
+}
+
+func TestHandleRollbackProject(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "shipdude-rollback-test")
+	defer os.RemoveAll(tmpDir)
+	store, _ := db.NewStore(filepath.Join(tmpDir, "shipdude.db"))
+	defer store.Close()
+
+	srvID, _ := store.SaveServer(db.Server{
+		Name:      "127.0.0.1",
+		IPAddress: "127.0.0.1",
+		SSHPort:   22,
+		SSHUser:   "root",
+	})
+	projID, _ := store.SaveProject(db.Project{
+		ServerID:       srvID,
+		GitHubRepo:     "user4xn/my-website",
+		GitHubBranch:   "main",
+		ProjectName:    "my-website",
+		DeploymentPath: "/var/www/my-website",
+		StackType:      "go",
+		StackVersion:   "1.23",
+		AppPort:        8080,
+		Domain:         "my-website.com",
+	})
+
+	ctx := NewServerContext(store)
+	payload := `{"target_image":"ghcr.io/user4xn/my-website:sha-abcdef"}`
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/projects/%d/rollback", projID), bytes.NewBufferString(payload))
+	
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", strconv.FormatInt(projID, 10))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	ctx.HandleRollbackProject(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var res map[string]string
+	json.NewDecoder(w.Body).Decode(&res)
+	if res["status"] != "triggered" {
+		t.Errorf("expected status 'triggered', got '%s'", res["status"])
+	}
+}
+
+func TestHandleVPSProbe_Success(t *testing.T) {
+	// 1. Setup mock SSH server
+	hostKey := generateTestHostKey(t)
+	sshAddr, sshServer := startMockSSHServer(t, hostKey, "deployer", "mypassword")
+	defer sshServer.Close()
+
+	sshHost, sshPortStr, _ := net.SplitHostPort(sshAddr)
+	var sshPort int
+	fmt.Sscanf(sshPortStr, "%d", &sshPort)
+
+	// 2. Initialize SQLite store
+	tmpDir, _ := os.MkdirTemp("", "shipdude-server-probe-test")
+	defer os.RemoveAll(tmpDir)
+	store, _ := db.NewStore(filepath.Join(tmpDir, "shipdude.db"))
+	defer store.Close()
+
+	ctx := NewServerContext(store)
+
+	// 3. Request probe payload
+	payload := map[string]interface{}{
+		"ip_address":  sshHost,
+		"ssh_port":    sshPort,
+		"ssh_user":    "deployer",
+		"auth_method": "password",
+		"password":    "mypassword",
+	}
+
+	bodyBytes, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/api/v1/vps/probe", bytes.NewBuffer(bodyBytes))
+	w := httptest.NewRecorder()
+
+	ctx.HandleVPSProbe(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected probe status 200, got: %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var diags struct {
+		Connected    bool `json:"connected"`
+		Bootstrapped bool `json:"bootstrapped"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&diags); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !diags.Connected {
+		t.Errorf("expected Connected=true, got false")
+	}
+	if !diags.Bootstrapped {
+		t.Errorf("expected Bootstrapped=true, got false")
+	}
+}
+
+func TestHandleDeleteProject(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "shipdude-delete-test")
+	defer os.RemoveAll(tmpDir)
+	store, _ := db.NewStore(filepath.Join(tmpDir, "shipdude.db"))
+	defer store.Close()
+
+	srvID, _ := store.SaveServer(db.Server{
+		Name:      "127.0.0.1",
+		IPAddress: "127.0.0.1",
+		SSHPort:   22,
+		SSHUser:   "root",
+	})
+	projID, _ := store.SaveProject(db.Project{
+		ServerID:       srvID,
+		GitHubRepo:     "user4xn/my-website",
+		GitHubBranch:   "main",
+		ProjectName:    "my-website",
+		DeploymentPath: "/var/www/my-website",
+		StackType:      "go",
+		StackVersion:   "1.23",
+		AppPort:        8080,
+		Domain:         "my-website.com",
+	})
+
+	ctx := NewServerContext(store)
+	
+	r := chi.NewRouter()
+	r.Delete("/api/v1/projects/{id}", ctx.HandleDeleteProject)
+
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/api/v1/projects/%d", projID), nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	_, err := store.GetProject(projID)
+	if err == nil {
+		t.Fatal("expected project to be deleted from database, but it was found")
 	}
 }
 

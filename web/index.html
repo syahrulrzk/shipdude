@@ -129,14 +129,23 @@
                             class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 font-mono text-xs p-4 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all duration-200 resize-y"></textarea>
                     </div>
 
-                    <div class="flex gap-3">
-                        <button type="button" class="flex-[2] bg-blue-500 hover:bg-blue-600 active:scale-[0.98] text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all duration-300" onclick="probeVPS()">
-                            <span>Test Connection & Probe</span>
-                            <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="vps-spinner"></div>
+                    <div class="flex flex-col gap-3">
+                        <div class="flex gap-3">
+                            <button type="button" class="flex-[2] bg-blue-500 hover:bg-blue-600 active:scale-[0.98] text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all duration-300" onclick="probeVPS()">
+                                <span>Test Connection & Probe</span>
+                                <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="vps-spinner"></div>
+                            </button>
+                            <button type="button" class="flex-1 bg-white/5 hover:bg-white/10 active:scale-[0.98] text-slate-200 font-semibold py-3.5 rounded-xl border border-white/5 transition-all duration-300 flex items-center justify-center gap-2" onclick="saveVPSConnectionManual()">
+                                <span>💾 Save</span>
+                            </button>
+                        </div>
+                        <button type="button" class="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-[0.98] text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all duration-300" onclick="provisionVPSPrompt()">
+                            <span>⚙️ Bootstrap & Provision VPS Node</span>
+                            <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="provision-spinner"></div>
                         </button>
-                        <button type="button" class="flex-1 bg-white/5 hover:bg-white/10 active:scale-[0.98] text-slate-200 font-semibold py-3.5 rounded-xl border border-white/5 transition-all duration-300 flex items-center justify-center gap-2" onclick="saveVPSConnectionManual()">
-                            <span>💾 Save</span>
-                        </button>
+                        <div id="bootstrap-status-badge" class="hidden text-xs text-center text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/20 rounded-xl py-2 px-3 mt-3">
+                            ✓ VPS is already bootstrapped. Re-provisioning is not required.
+                        </div>
                     </div>
                 </form>
 
@@ -166,6 +175,10 @@
                         </li>
                         <li id="vps-status-group" class="flex justify-between items-center py-1">
                             <span class="text-sm text-slate-400">In Docker Group</span>
+                            <span class="val font-semibold text-slate-200">Checking...</span>
+                        </li>
+                        <li id="vps-status-bootstrapped" class="flex justify-between items-center py-1">
+                            <span class="text-sm text-slate-400">ShipDude Bootstrap</span>
                             <span class="val font-semibold text-slate-200">Checking...</span>
                         </li>
                     </ul>
@@ -291,9 +304,15 @@
                         </div>
                     </div>
 
-                    <div>
-                        <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Remote Deployment Folder Path</label>
-                        <input type="text" id="deploy_path" placeholder="e.g. /var/www/my-app" required class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-purple-500">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Remote Deployment Folder Path</label>
+                            <input type="text" id="deploy_path" placeholder="e.g. /var/www/my-app" required class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Domain Name (Optional)</label>
+                            <input type="text" id="deploy_domain" placeholder="e.g. myapp.com" class="w-full bg-slate-900/60 border border-white/5 rounded-xl text-slate-100 text-sm px-4 py-2.5 focus:outline-none focus:border-purple-500">
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-3 gap-3">
@@ -317,6 +336,40 @@
                 </div>
             </form>
         </section>
+        
+        <!-- Deployed Projects & Rollbacks Card -->
+        <section id="projects-card" class="mt-8 bg-white/[0.03] backdrop-blur-md border border-white/5 rounded-3xl p-8 shadow-2xl hover:border-white/10 transition-all duration-300">
+            <div class="flex items-center gap-3 mb-6">
+                <span class="text-2xl">📋</span>
+                <h2 class="text-xl font-semibold tracking-tight">Active Deployments & Container Lifecycle</h2>
+            </div>
+            <div id="projects-list-container" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Dynamically filled with active projects -->
+                <p class="col-span-1 md:col-span-2 text-slate-400 text-sm italic">No active projects registered. Use the configuration form above to launch your first deployment.</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Terminal Overlay Modal -->
+    <div id="terminal-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm hidden">
+        <div class="bg-black border border-white/10 rounded-3xl max-w-3xl w-full h-[550px] shadow-2xl flex flex-col overflow-hidden mx-4">
+            <!-- Terminal Header -->
+            <div class="bg-slate-900 border-b border-white/10 px-6 py-4 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <span class="flex gap-1.5">
+                        <span class="w-3 h-3 rounded-full bg-rose-500"></span>
+                        <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+                        <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+                    </span>
+                    <span class="text-xs font-mono text-slate-400 font-bold uppercase tracking-wider" id="terminal-title">Real-time Stream Console</span>
+                </div>
+                <button onclick="closeTerminal()" class="text-slate-400 hover:text-white transition-colors text-lg focus:outline-none">✕</button>
+            </div>
+            <!-- Terminal Content -->
+            <div id="terminal-content" class="flex-1 p-6 overflow-y-auto font-mono text-xs text-emerald-400 space-y-1.5 bg-black scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                <div class="text-slate-500">// Terminal stream initialized. Waiting for input...</div>
+            </div>
+        </div>
     </div>
 
     <!-- Settings Modal -->

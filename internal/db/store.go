@@ -36,6 +36,10 @@ type Project struct {
 	StackType      string `json:"stack_type"`
 	StackVersion   string `json:"stack_version"`
 	AppPort        int    `json:"app_port"`
+	Domain         string `json:"domain"`
+	ActivePort     int    `json:"active_port"`
+	ActiveImage    string `json:"active_image"`
+	ServerIP       string `json:"server_ip"`
 }
 
 // Store holds the database connection and encryption keys.
@@ -131,6 +135,12 @@ func (s *Store) initSchema() error {
 			return err
 		}
 	}
+
+	// Apply migrations if fields are missing in older databases
+	s.db.Exec(`ALTER TABLE projects ADD COLUMN domain TEXT DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE projects ADD COLUMN active_port INTEGER DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE projects ADD COLUMN active_image TEXT DEFAULT ''`)
+
 	return nil
 }
 
@@ -200,8 +210,8 @@ func (s *Store) ListServers() ([]Server, error) {
 // Project CRUD
 func (s *Store) SaveProject(proj Project) (int64, error) {
 	res, err := s.db.Exec(
-		`INSERT INTO projects (server_id, github_repo, github_branch, project_name, deployment_path, stack_type, stack_version, app_port) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		proj.ServerID, proj.GitHubRepo, proj.GitHubBranch, proj.ProjectName, proj.DeploymentPath, proj.StackType, proj.StackVersion, proj.AppPort,
+		`INSERT INTO projects (server_id, github_repo, github_branch, project_name, deployment_path, stack_type, stack_version, app_port, domain, active_port, active_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		proj.ServerID, proj.GitHubRepo, proj.GitHubBranch, proj.ProjectName, proj.DeploymentPath, proj.StackType, proj.StackVersion, proj.AppPort, proj.Domain, proj.ActivePort, proj.ActiveImage,
 	)
 	if err != nil {
 		return 0, err
@@ -210,17 +220,45 @@ func (s *Store) SaveProject(proj Project) (int64, error) {
 	return res.LastInsertId()
 }
 
+func (s *Store) UpdateProjectActiveState(id int64, activePort int, activeImage string) error {
+	_, err := s.db.Exec(
+		`UPDATE projects SET active_port = ?, active_image = ? WHERE id = ?`,
+		activePort, activeImage, id,
+	)
+	return err
+}
+
 func (s *Store) GetProject(id int64) (Project, error) {
 	var proj Project
 	err := s.db.QueryRow(
-		`SELECT id, server_id, github_repo, github_branch, project_name, deployment_path, stack_type, stack_version, app_port FROM projects WHERE id = ?`, id,
-	).Scan(&proj.ID, &proj.ServerID, &proj.GitHubRepo, &proj.GitHubBranch, &proj.ProjectName, &proj.DeploymentPath, &proj.StackType, &proj.StackVersion, &proj.AppPort)
+		`SELECT p.id, p.server_id, p.github_repo, p.github_branch, p.project_name, p.deployment_path, p.stack_type, p.stack_version, p.app_port, p.domain, p.active_port, p.active_image, s.ip_address 
+		 FROM projects p 
+		 JOIN servers s ON p.server_id = s.id 
+		 WHERE p.id = ?`, id,
+	).Scan(&proj.ID, &proj.ServerID, &proj.GitHubRepo, &proj.GitHubBranch, &proj.ProjectName, &proj.DeploymentPath, &proj.StackType, &proj.StackVersion, &proj.AppPort, &proj.Domain, &proj.ActivePort, &proj.ActiveImage, &proj.ServerIP)
+
+	return proj, err
+}
+
+func (s *Store) GetProjectByRepo(repo string) (Project, error) {
+	var proj Project
+	err := s.db.QueryRow(
+		`SELECT p.id, p.server_id, p.github_repo, p.github_branch, p.project_name, p.deployment_path, p.stack_type, p.stack_version, p.app_port, p.domain, p.active_port, p.active_image, s.ip_address 
+		 FROM projects p 
+		 JOIN servers s ON p.server_id = s.id 
+		 WHERE p.github_repo = ? 
+		 ORDER BY p.id DESC LIMIT 1`, repo,
+	).Scan(&proj.ID, &proj.ServerID, &proj.GitHubRepo, &proj.GitHubBranch, &proj.ProjectName, &proj.DeploymentPath, &proj.StackType, &proj.StackVersion, &proj.AppPort, &proj.Domain, &proj.ActivePort, &proj.ActiveImage, &proj.ServerIP)
 
 	return proj, err
 }
 
 func (s *Store) ListProjects() ([]Project, error) {
-	rows, err := s.db.Query(`SELECT id, server_id, github_repo, github_branch, project_name, deployment_path, stack_type, stack_version, app_port FROM projects`)
+	rows, err := s.db.Query(`
+		SELECT p.id, p.server_id, p.github_repo, p.github_branch, p.project_name, p.deployment_path, p.stack_type, p.stack_version, p.app_port, p.domain, p.active_port, p.active_image, s.ip_address 
+		FROM projects p 
+		JOIN servers s ON p.server_id = s.id
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -229,12 +267,37 @@ func (s *Store) ListProjects() ([]Project, error) {
 	var list []Project
 	for rows.Next() {
 		var proj Project
-		if err := rows.Scan(&proj.ID, &proj.ServerID, &proj.GitHubRepo, &proj.GitHubBranch, &proj.ProjectName, &proj.DeploymentPath, &proj.StackType, &proj.StackVersion, &proj.AppPort); err != nil {
+		if err := rows.Scan(&proj.ID, &proj.ServerID, &proj.GitHubRepo, &proj.GitHubBranch, &proj.ProjectName, &proj.DeploymentPath, &proj.StackType, &proj.StackVersion, &proj.AppPort, &proj.Domain, &proj.ActivePort, &proj.ActiveImage, &proj.ServerIP); err != nil {
 			return nil, err
 		}
 		list = append(list, proj)
 	}
 	return list, nil
+}
+
+func (s *Store) GetProjectByName(name string) (Project, error) {
+	var proj Project
+	err := s.db.QueryRow(
+		`SELECT p.id, p.server_id, p.github_repo, p.github_branch, p.project_name, p.deployment_path, p.stack_type, p.stack_version, p.app_port, p.domain, p.active_port, p.active_image, s.ip_address 
+		 FROM projects p 
+		 JOIN servers s ON p.server_id = s.id 
+		 WHERE p.project_name = ?`, name,
+	).Scan(&proj.ID, &proj.ServerID, &proj.GitHubRepo, &proj.GitHubBranch, &proj.ProjectName, &proj.DeploymentPath, &proj.StackType, &proj.StackVersion, &proj.AppPort, &proj.Domain, &proj.ActivePort, &proj.ActiveImage, &proj.ServerIP)
+
+	return proj, err
+}
+
+func (s *Store) UpdateProject(proj Project) error {
+	_, err := s.db.Exec(
+		`UPDATE projects SET server_id = ?, github_repo = ?, github_branch = ?, deployment_path = ?, stack_type = ?, stack_version = ?, app_port = ?, domain = ? WHERE id = ?`,
+		proj.ServerID, proj.GitHubRepo, proj.GitHubBranch, proj.DeploymentPath, proj.StackType, proj.StackVersion, proj.AppPort, proj.Domain, proj.ID,
+	)
+	return err
+}
+
+func (s *Store) DeleteProject(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+	return err
 }
 
 // Settings CRUD (Encrypted storage)

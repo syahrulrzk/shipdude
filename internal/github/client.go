@@ -200,7 +200,7 @@ func UploadRepoSecret(token, owner, repo, secretName, secretValue string) error 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to upload secret (status %d): %s", resp.StatusCode, string(body))
 	}
@@ -208,12 +208,11 @@ func UploadRepoSecret(token, owner, repo, secretName, secretValue string) error 
 	return nil
 }
 
-// CommitWorkflowFile commits the shipdude.yml deployment configuration directly.
-func CommitWorkflowFile(token, owner, repo, branch, yamlContent string) error {
-	path := ".github/workflows/shipdude.yml"
+// CommitFile commits a file directly to the repository contents.
+func CommitFile(token, owner, repo, branch, path, content, commitMessage string) error {
 	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s", BaseURL, owner, repo, path)
 
-	// 1. Check if the file exists to get its current SHA (required for update PUT)
+	// Check if the file exists to get its current SHA (required for update PUT)
 	reqCheck, err := http.NewRequest("GET", url+"?ref="+branch, nil)
 	var currentSHA string
 	if err == nil {
@@ -234,10 +233,9 @@ func CommitWorkflowFile(token, owner, repo, branch, yamlContent string) error {
 		}
 	}
 
-	// 2. Commit the content
-	b64Content := base64.StdEncoding.EncodeToString([]byte(yamlContent))
+	b64Content := base64.StdEncoding.EncodeToString([]byte(content))
 	payload := map[string]interface{}{
-		"message": "ci: inject ShipDude auto deployment workflow",
+		"message": commitMessage,
 		"content": b64Content,
 		"branch":  branch,
 		"committer": map[string]string{
@@ -273,10 +271,117 @@ func CommitWorkflowFile(token, owner, repo, branch, yamlContent string) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to commit workflow file (status %d): %s", resp.StatusCode, string(body))
+		scopes := resp.Header.Get("X-OAuth-Scopes")
+		acceptedScopes := resp.Header.Get("X-Accepted-OAuth-Scopes")
+		return fmt.Errorf("failed to commit file %s (status %d): %s (Token Scopes: %q, Accepted Scopes: %q)", path, resp.StatusCode, string(body), scopes, acceptedScopes)
 	}
 
 	return nil
+}
+
+// CommitWorkflowFile commits the shipdude.yml deployment configuration directly.
+func CommitWorkflowFile(token, owner, repo, branch, yamlContent string) error {
+	return CommitFile(token, owner, repo, branch, ".github/workflows/shipdude.yml", yamlContent, "ci: inject ShipDude auto deployment workflow")
+}
+
+// CheckFileExists checks if a file exists in the repository on the given branch.
+func CheckFileExists(token, owner, repo, branch, path string) (bool, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", BaseURL, owner, repo, path, branch)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return true, nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return false, fmt.Errorf("failed to check file existence (status %d): %s", resp.StatusCode, string(body))
+}
+
+// GenerateDefaultDockerfile produces a production-ready multi-stage Dockerfile based on stack type.
+func GenerateDefaultDockerfile(stackType, stackVersion string) string {
+	if stackVersion == "" || stackVersion == "latest" {
+		stackVersion = "latest"
+	}
+
+	switch strings.ToLower(stackType) {
+	case "go", "golang":
+		version := stackVersion
+		if version == "latest" {
+			version = "1.21-alpine"
+		} else if !strings.Contains(version, "alpine") {
+			version = version + "-alpine"
+		}
+		return fmt.Sprintf(`# Build stage
+FROM golang:%s AS builder
+WORKDIR /app
+COPY go.mod go.sum* ./
+RUN go mod download || true
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o main .
+
+# Run stage
+FROM alpine:latest
+WORKDIR /app
+COPY --from=builder /app/main .
+EXPOSE 8080
+CMD ["./main"]
+`, version)
+
+	case "node", "nodejs", "javascript", "typescript":
+		version := stackVersion
+		if version == "latest" {
+			version = "18-alpine"
+		} else if !strings.Contains(version, "alpine") {
+			version = version + "-alpine"
+		}
+		return fmt.Sprintf(`FROM node:%s
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --production || npm install
+COPY . .
+EXPOSE 3000
+CMD ["npm", "start"]
+`, version)
+
+	case "python":
+		version := stackVersion
+		if version == "latest" {
+			version = "3.10-slim"
+		} else if !strings.Contains(version, "slim") && !strings.Contains(version, "alpine") {
+			version = version + "-slim"
+		}
+		return fmt.Sprintf(`FROM python:%s
+WORKDIR /app
+COPY requirements.txt* ./
+RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
+COPY . .
+EXPOSE 8000
+CMD ["python", "-m", "http.server", "8000"]
+`, version)
+
+	default:
+		// Fallback simple static/generic Dockerfile
+		return `FROM alpine:latest
+WORKDIR /app
+COPY . .
+EXPOSE 80
+CMD ["sh"]
+`
+	}
 }
 
 // ParseRepoOwner parses owner and repo name from "owner/repo" full name.
