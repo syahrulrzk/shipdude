@@ -16,6 +16,7 @@ type StackInfo struct {
 	Version       string   `json:"version"`
 	DefaultPort   int      `json:"default_port"`
 	DetectedFiles []string `json:"detected_files"`
+	HasDockerfile bool     `json:"has_dockerfile"`
 }
 
 // GitHubFile represents a file object returned by the GitHub Contents API
@@ -66,10 +67,15 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 	hasPackageJSON := false
 	hasGoMod := false
 	hasReqs := false
+	hasDockerfile := false
 	var detected []string
 
 	for _, f := range files {
 		if f.Type == "file" {
+			if f.Name == "Dockerfile" {
+				hasDockerfile = true
+				detected = append(detected, "Dockerfile")
+			}
 			switch f.Name {
 			case "package.json":
 				hasPackageJSON = true
@@ -100,6 +106,7 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 			Version:       version,
 			DefaultPort:   8080,
 			DetectedFiles: detected,
+			HasDockerfile: hasDockerfile,
 		}, nil
 	}
 
@@ -128,6 +135,7 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 			Version:       version,
 			DefaultPort:   port,
 			DetectedFiles: detected,
+			HasDockerfile: hasDockerfile,
 		}, nil
 	}
 
@@ -137,6 +145,7 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 			Version:       "3.11-slim",
 			DefaultPort:   8000,
 			DetectedFiles: detected,
+			HasDockerfile: hasDockerfile,
 		}, nil
 	}
 
@@ -145,6 +154,7 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 		Version:       "latest",
 		DefaultPort:   80,
 		DetectedFiles: detected,
+		HasDockerfile: hasDockerfile,
 	}, nil
 }
 

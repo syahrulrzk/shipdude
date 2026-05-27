@@ -380,6 +380,28 @@ async function detectStack() {
         document.getElementById('tech-port').textContent = result.default_port;
         document.getElementById('tech-files').textContent = result.detected_files.join(', ') || 'None';
 
+        const elEligibility = document.getElementById('tech-eligibility');
+        const warnBox = document.getElementById('eligibility-warning');
+        const deployBtn = document.getElementById('deploy-submit-btn');
+
+        if (result.has_dockerfile) {
+            elEligibility.textContent = 'Eligible';
+            elEligibility.className = 'val font-semibold px-2 px-2.5 py-1 rounded text-xs bg-emerald-500/10 border border-emerald-500/20 text-emerald-400';
+            warnBox.classList.add('hidden');
+            if (deployBtn) {
+                deployBtn.disabled = false;
+                deployBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+            }
+        } else {
+            elEligibility.textContent = 'Not Eligible';
+            elEligibility.className = 'val font-semibold px-2 px-2.5 py-1 rounded text-xs bg-red-500/10 border border-red-500/20 text-red-400';
+            warnBox.classList.remove('hidden');
+            if (deployBtn) {
+                deployBtn.disabled = true;
+                deployBtn.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+            }
+        }
+
         // Auto-fill deploy page properties
         document.getElementById('deploy_stack_info').value = `${result.language} (version ${result.version})`;
         document.getElementById('deploy_port_val').value = result.default_port;
@@ -401,6 +423,20 @@ async function detectStack() {
         document.getElementById('tech-version').textContent = 'Version: -';
         document.getElementById('tech-port').textContent = '-';
         document.getElementById('tech-files').textContent = '-';
+        
+        const elEligibility = document.getElementById('tech-eligibility');
+        if (elEligibility) {
+            elEligibility.textContent = '-';
+            elEligibility.className = 'val font-semibold px-2 px-2.5 py-1 rounded text-xs';
+        }
+        const warnBox = document.getElementById('eligibility-warning');
+        if (warnBox) warnBox.classList.add('hidden');
+        const deployBtn = document.getElementById('deploy-submit-btn');
+        if (deployBtn) {
+            deployBtn.disabled = false;
+            deployBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+        }
+
         const logo = document.getElementById('tech-logo-char');
         logo.className = 'w-12 h-12 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-center text-lg font-bold transition-colors';
         logo.textContent = '?';

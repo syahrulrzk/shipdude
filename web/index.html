@@ -233,7 +233,18 @@
                                 <span class="text-slate-400">Detected Meta Files</span>
                                 <span class="val font-semibold text-slate-200 font-mono text-xs bg-white/[0.04] px-2 py-1 rounded" id="tech-files">-</span>
                             </li>
+                            <li class="flex justify-between items-center text-sm border-t border-white/5 pt-3 mt-3">
+                                <span class="text-slate-400">Repo Eligibility</span>
+                                <span class="val font-semibold px-2 px-2.5 py-1 rounded text-xs" id="tech-eligibility">-</span>
+                            </li>
                         </ul>
+                        <div id="eligibility-warning" class="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs hidden space-y-2">
+                            <p class="font-bold">⚠️ Repository is not eligible for deployment:</p>
+                            <ul class="list-disc list-inside space-y-1 text-slate-300">
+                                <li>A valid <b>Dockerfile</b> is missing from the repository root.</li>
+                                <li>Your Dockerfile must build and serve the application on the configured port (e.g. PORT 3000).</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -329,7 +340,7 @@
 
                 <!-- Submit Section across all columns -->
                 <div class="col-span-1 md:col-span-2 pt-4">
-                    <button type="submit" class="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 active:scale-[0.98] text-white font-semibold py-4 rounded-xl shadow-xl shadow-blue-500/10 flex items-center justify-center gap-2 transition-all duration-300">
+                    <button type="submit" id="deploy-submit-btn" class="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 active:scale-[0.98] text-white font-semibold py-4 rounded-xl shadow-xl shadow-blue-500/10 flex items-center justify-center gap-2 transition-all duration-300">
                         <span>🚀 Bootstrap Deployment & Setup Auto-CI/CD</span>
                         <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin hidden" id="deploy-spinner"></div>
                     </button>

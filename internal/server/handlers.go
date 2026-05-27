@@ -337,19 +337,22 @@ func (ctx *ServerContext) HandleDeployProject(w http.ResponseWriter, r *http.Req
 		job.AddLog("[GitHub] 4.5. Checking if Dockerfile exists in repository...")
 		hasDockerfile, err := github.CheckFileExists(token, owner, repo, req.GitHubBranch, "Dockerfile")
 		if err != nil {
-			job.AddLog("[Warning] Failed to check for existing Dockerfile: " + err.Error() + ". Proceeding...")
-		} else if !hasDockerfile {
-			job.AddLog(fmt.Sprintf("[GitHub] Dockerfile not found. Generating default Dockerfile for stack %s (%s)...", req.StackType, req.StackVersion))
-			dockerfileContent := github.GenerateDefaultDockerfile(req.StackType, req.StackVersion)
-			err = github.CommitFile(token, owner, repo, req.GitHubBranch, "Dockerfile", dockerfileContent, "ci: inject default Dockerfile for "+req.StackType)
-			if err != nil {
-				job.AddLog("[Error] Failed to commit default Dockerfile: " + err.Error())
-				return
-			}
-			job.AddLog("[GitHub] Default Dockerfile committed successfully!")
-		} else {
-			job.AddLog("[GitHub] Existing Dockerfile found. Skipping generation.")
+			job.AddLog("[Error] Failed to verify if Dockerfile exists in repository: " + err.Error())
+			return
 		}
+
+		if !hasDockerfile {
+			job.AddLog("[Error] Dockerfile not found in repository root. A valid Dockerfile is required for deployment.")
+			job.AddLog("[System] === REPOSITORY ELIGIBILITY REQUIREMENTS ===")
+			job.AddLog("[System] 1. A valid 'Dockerfile' must exist in the root of the repository.")
+			job.AddLog("[System] 2. The Dockerfile must build successfully and run a server/service.")
+			job.AddLog("[System] 3. The service must listen and serve on the configured project port (e.g., PORT 3000) so that Caddy can proxy the traffic.")
+			job.AddLog("[System] ============================================")
+			job.AddLog("[Error] Project setup terminated due to missing requirements.")
+			return
+		}
+
+		job.AddLog("[GitHub] Existing Dockerfile verified successfully!")
 
 		job.AddLog("[GitHub] 5. Committing CI/CD workflow template to repository...")
 		if strings.Contains(serverURL, "localhost") || strings.Contains(serverURL, "127.0.0.1") {

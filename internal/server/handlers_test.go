@@ -217,6 +217,11 @@ func TestHandleDeployProject_FullFlow(t *testing.T) {
 			return
 		}
 		if r.Method == "GET" && strings.Contains(r.URL.Path, "contents") {
+			if strings.Contains(r.URL.Path, "Dockerfile") {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"type": "file", "name": "Dockerfile"}`))
+				return
+			}
 			// Mock check workflow file, return 404
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -596,6 +601,11 @@ func TestHandleDeployProject_ManualToken(t *testing.T) {
 			return
 		}
 		if r.Method == "GET" && strings.Contains(r.URL.Path, "contents") {
+			if strings.Contains(r.URL.Path, "Dockerfile") {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"type": "file", "name": "Dockerfile"}`))
+				return
+			}
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
