@@ -1156,7 +1156,25 @@ func (ctx *ServerContext) performHotSwap(proj db.Project, srv db.Server, image s
 		targetPort = portB
 	}
 
-	job.AddLog(fmt.Sprintf("[System] Current Active Port: %d. Target Hot-Swap Port: %d.", proj.ActivePort, targetPort))
+	// Authenticate with GHCR using saved github_oauth_token if present
+	parts := strings.Split(proj.GitHubRepo, "/")
+	owner := parts[0]
+	token, _ := ctx.Store.GetSetting("github_oauth_token")
+	if token == "" {
+		token = os.Getenv("GITHUB_OAUTH_TOKEN")
+	}
+	if token != "" {
+		job.AddLog("[Docker] Authenticating with GitHub Container Registry (ghcr.io)...")
+		loginCmd := fmt.Sprintf("echo %q | docker login ghcr.io -u %q --password-stdin", token, owner)
+		err = internalssh.RunCommandStream(client, loginCmd, func(line string) {
+			if !strings.Contains(line, token) {
+				job.AddLog("[Docker] " + line)
+			}
+		})
+		if err != nil {
+			job.AddLog("[Warning] GHCR authentication failed: " + err.Error() + ". Attempting pull anyway...")
+		}
+	}
 
 	job.AddLog(fmt.Sprintf("[Docker] Pulling image: %s...", image))
 	pullCmd := fmt.Sprintf("docker pull %s", image)
@@ -1280,7 +1298,14 @@ func (ctx *ServerContext) regenerateCaddyfile(client *cryptossh.Client, serverID
 	writeCmd := fmt.Sprintf("echo '%s' | base64 -d | sudo tee /var/lib/shipdude/caddy/Caddyfile >/dev/null", b64Content)
 	
 	err = internalssh.RunCommandStream(client, writeCmd, func(string) {})
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Copy to Caddy container to support DIND / simulator host-mount limitations
+	cpCmd := "docker cp /var/lib/shipdude/caddy/Caddyfile shipdude-caddy:/etc/caddy/Caddyfile"
+	_ = internalssh.RunCommandStream(client, cpCmd, func(string) {})
+	return nil
 }
 
 // cleanProjectName formats project names to be docker-safe

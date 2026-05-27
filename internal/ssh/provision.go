@@ -128,10 +128,12 @@ sudo chown -R deployer:docker /var/lib/shipdude/caddy &&
 	if !caddyRunning {
 		logFunc("[Provision] Launching Caddy ingress container...")
 		_ = runCmd("docker rm -f shipdude-caddy || true")
-		caddyLaunchCmd := "docker run -d --name shipdude-caddy --restart unless-stopped --network host -v /var/lib/shipdude/caddy:/etc/caddy caddy:2-alpine"
+		caddyLaunchCmd := "docker run -d --name shipdude-caddy --restart unless-stopped --network host -v shipdude-caddy-config:/etc/caddy caddy:2-alpine"
 		if err := runCmd(caddyLaunchCmd); err != nil {
 			return fmt.Errorf("failed to start Caddy ingress container: %w", err)
 		}
+		// Copy initial Caddyfile into the container to support DIND / simulator environments
+		_ = runCmd("docker cp /var/lib/shipdude/caddy/Caddyfile shipdude-caddy:/etc/caddy/Caddyfile || true")
 	} else {
 		logFunc("[Provision] Caddy ingress container is already active.")
 	}
