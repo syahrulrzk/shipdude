@@ -10,6 +10,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setupPrivateKeyMasking('private_key');
     setupPrivateKeyMasking('deploy_private_key');
     loadProjects();
+    
+    // Initialize guide state
+    if (localStorage.getItem('shipdude_guide_expanded') === 'true') {
+        const content = document.getElementById('guide-content');
+        const arrow = document.getElementById('guide-arrow');
+        if (content && arrow) {
+            content.classList.remove('hidden');
+            arrow.textContent = '▲';
+        }
+    }
 });
 
 function checkLocalhostWebhookWarning() {
@@ -621,7 +631,12 @@ async function saveVPSConnectionManual() {
 }
 
 async function disconnectGitHub() {
-    if (!confirm('Are you sure you want to disconnect your GitHub integration? This will clear your access token.')) {
+    const ok = await showConfirm(
+        'Disconnect GitHub',
+        'Are you sure you want to disconnect your GitHub integration? This will clear your access token.',
+        { type: 'danger', okText: 'Disconnect', icon: '🔌' }
+    );
+    if (!ok) {
         return;
     }
 
@@ -821,7 +836,12 @@ async function loadProjects() {
 }
 
 async function deleteProject(id) {
-    if (!confirm('Are you sure you want to delete this project configuration? This will only remove the configuration from ShipDude, it will not stop or delete any running containers on your VPS.')) {
+    const ok = await showConfirm(
+        'Delete Project',
+        'Are you sure you want to delete this project configuration? This will only remove the configuration from ShipDude, it will not stop or delete any running containers on your VPS.',
+        { type: 'danger', okText: 'Delete', icon: '🗑️' }
+    );
+    if (!ok) {
         return;
     }
     try {
@@ -852,7 +872,12 @@ async function provisionVPSPrompt() {
         return;
     }
 
-    if (!confirm('Are you sure you want to provision and bootstrap this VPS? This will install Docker and setup deployment directories.')) {
+    const ok = await showConfirm(
+        'Provision VPS Node',
+        'Are you sure you want to provision and bootstrap this VPS? This will install Docker and setup deployment directories.',
+        { type: 'warning', okText: 'Bootstrap', icon: '⚙️' }
+    );
+    if (!ok) {
         return;
     }
 
@@ -902,7 +927,12 @@ async function rollbackProject(id) {
         return;
     }
 
-    if (!confirm(`Are you sure you want to deploy image "${imgVal}"?`)) {
+    const ok = await showConfirm(
+        'Deploy / Rollback Image',
+        `Are you sure you want to deploy image "${imgVal}"?`,
+        { type: 'warning', okText: 'Deploy', icon: '🚀' }
+    );
+    if (!ok) {
         return;
     }
 
@@ -1153,4 +1183,79 @@ async function controlContainer(action) {
         btn.disabled = false;
         btn.textContent = oldText;
     }
+}
+
+function toggleGuide() {
+    const content = document.getElementById('guide-content');
+    const arrow = document.getElementById('guide-arrow');
+    if (!content || !arrow) return;
+    
+    if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        arrow.textContent = '▲';
+        localStorage.setItem('shipdude_guide_expanded', 'true');
+    } else {
+        content.classList.add('hidden');
+        arrow.textContent = '▼';
+        localStorage.setItem('shipdude_guide_expanded', 'false');
+    }
+}
+
+function showConfirm(title, message, options = {}) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirm-modal');
+        const box = document.getElementById('confirm-modal-box');
+        const titleEl = document.getElementById('confirm-title');
+        const msgEl = document.getElementById('confirm-message');
+        const iconEl = document.getElementById('confirm-icon');
+        const okBtn = document.getElementById('confirm-ok-btn');
+        const cancelBtn = document.getElementById('confirm-cancel-btn');
+
+        if (!modal || !box) {
+            resolve(confirm(message));
+            return;
+        }
+
+        titleEl.textContent = title || 'Confirm Action';
+        msgEl.textContent = message || 'Are you sure you want to proceed?';
+        iconEl.textContent = options.icon || '⚠️';
+
+        const type = options.type || 'warning';
+        if (type === 'danger') {
+            iconEl.className = 'w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-xl shrink-0 text-rose-400';
+            okBtn.className = 'flex-1 bg-rose-500 hover:bg-rose-600 active:scale-[0.98] text-white font-bold py-3 rounded-xl text-xs transition-all';
+            okBtn.textContent = options.okText || 'Delete';
+        } else if (type === 'success') {
+            iconEl.className = 'w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-xl shrink-0 text-emerald-400';
+            okBtn.className = 'flex-1 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-slate-950 font-bold py-3 rounded-xl text-xs transition-all';
+            okBtn.textContent = options.okText || 'Confirm';
+        } else {
+            iconEl.className = 'w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-xl shrink-0 text-amber-400';
+            okBtn.className = 'flex-1 bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-slate-950 font-bold py-3 rounded-xl text-xs transition-all';
+            okBtn.textContent = options.okText || 'Confirm';
+        }
+
+        cancelBtn.textContent = options.cancelText || 'Cancel';
+
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            box.classList.remove('scale-95', 'opacity-0');
+            box.classList.add('scale-100', 'opacity-100');
+        }, 10);
+
+        function cleanup(result) {
+            box.classList.remove('scale-100', 'opacity-100');
+            box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                resolve(result);
+            }, 150);
+        }
+
+        okBtn.onclick = () => cleanup(true);
+        cancelBtn.onclick = () => cleanup(false);
+        modal.onclick = (e) => {
+            if (e.target === modal) cleanup(false);
+        };
+    });
 }
