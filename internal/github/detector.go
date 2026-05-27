@@ -91,6 +91,7 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 	}
 
 	// 2. Fetch specific versions based on detected files
+	var info *StackInfo
 	if hasGoMod {
 		version := "1.23-alpine" // default fallback
 		content, err := fetchFileContent(client, repo, "go.mod", token)
@@ -101,16 +102,14 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 				version = matches[1] + "-alpine"
 			}
 		}
-		return &StackInfo{
+		info = &StackInfo{
 			Language:      "go",
 			Version:       version,
 			DefaultPort:   8080,
 			DetectedFiles: detected,
 			HasDockerfile: hasDockerfile,
-		}, nil
-	}
-
-	if hasPackageJSON {
+		}
+	} else if hasPackageJSON {
 		version := "20-alpine" // default fallback
 		port := 3000
 		content, err := fetchFileContent(client, repo, "package.json", token)
@@ -130,32 +129,46 @@ func DetectStack(repo string, token string) (*StackInfo, error) {
 				}
 			}
 		}
-		return &StackInfo{
+		info = &StackInfo{
 			Language:      "node",
 			Version:       version,
 			DefaultPort:   port,
 			DetectedFiles: detected,
 			HasDockerfile: hasDockerfile,
-		}, nil
-	}
-
-	if hasReqs {
-		return &StackInfo{
+		}
+	} else if hasReqs {
+		info = &StackInfo{
 			Language:      "python",
 			Version:       "3.11-slim",
 			DefaultPort:   8000,
 			DetectedFiles: detected,
 			HasDockerfile: hasDockerfile,
-		}, nil
+		}
+	} else {
+		info = &StackInfo{
+			Language:      "unknown",
+			Version:       "latest",
+			DefaultPort:   80,
+			DetectedFiles: detected,
+			HasDockerfile: hasDockerfile,
+		}
 	}
 
-	return &StackInfo{
-		Language:      "unknown",
-		Version:       "latest",
-		DefaultPort:   80,
-		DetectedFiles: detected,
-		HasDockerfile: hasDockerfile,
-	}, nil
+	if hasDockerfile {
+		content, err := fetchFileContent(client, repo, "Dockerfile", token)
+		if err == nil {
+			re := regexp.MustCompile(`(?m)^EXPOSE\s+(\d+)`)
+			matches := re.FindStringSubmatch(content)
+			if len(matches) > 1 {
+				var p int
+				if _, err := fmt.Sscanf(matches[1], "%d", &p); err == nil && p > 0 {
+					info.DefaultPort = p
+				}
+			}
+		}
+	}
+
+	return info, nil
 }
 
 func fetchFileContent(client *http.Client, repo string, path string, token string) (string, error) {

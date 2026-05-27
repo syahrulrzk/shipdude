@@ -122,3 +122,54 @@ func TestDetectStack_Node(t *testing.T) {
 		t.Errorf("Expected default port 3000, got %d", info.DefaultPort)
 	}
 }
+
+func TestDetectStack_WithDockerfileExpose(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/username/exposed-app/contents" {
+			files := []GitHubFile{
+				{Name: "package.json", Type: "file", Size: 100},
+				{Name: "Dockerfile", Type: "file", Size: 150},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(files)
+			return
+		}
+
+		if r.URL.Path == "/repos/username/exposed-app/contents/package.json" {
+			rawContent := `{"name": "exposed-app"}`
+			encodedContent := base64.StdEncoding.EncodeToString([]byte(rawContent))
+			file := GitHubFile{Name: "package.json", Type: "file", Size: 100, Content: encodedContent}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(file)
+			return
+		}
+
+		if r.URL.Path == "/repos/username/exposed-app/contents/Dockerfile" {
+			rawContent := "FROM node:20-alpine\nWORKDIR /app\nCOPY . .\nEXPOSE 5000\nCMD [\"node\", \"index.js\"]\n"
+			encodedContent := base64.StdEncoding.EncodeToString([]byte(rawContent))
+			file := GitHubFile{Name: "Dockerfile", Type: "file", Size: 150, Content: encodedContent}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(file)
+			return
+		}
+
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	oldBaseURL := BaseURL
+	BaseURL = server.URL
+	defer func() { BaseURL = oldBaseURL }()
+
+	info, err := DetectStack("username/exposed-app", "")
+	if err != nil {
+		t.Fatalf("Unexpected error in DetectStack: %v", err)
+	}
+
+	if !info.HasDockerfile {
+		t.Errorf("Expected HasDockerfile to be true")
+	}
+	if info.DefaultPort != 5000 {
+		t.Errorf("Expected default port to be 5000 (from EXPOSE), got %d", info.DefaultPort)
+	}
+}
