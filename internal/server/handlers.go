@@ -535,11 +535,11 @@ jobs:
           username: "%s"
           key: "${{ secrets.SHIPDUDE_SSH_PRIVATE_KEY }}"
           script: |
-            # Trigger ShipDude agent deployment
+            # Trigger ShipDude agent deployment (fails silently with || true if ShipDude is offline)
             if command -v curl >/dev/null 2>&1; then
-              curl -X POST -d '{"sha":"${{ github.sha }}"}' -H "Content-Type: application/json" "%s/api/v1/projects/deploy-trigger?repo=${{ github.repository }}"
+              curl -s -X POST -d '{"sha":"${{ github.sha }}"}' -H "Content-Type: application/json" "%s/api/v1/projects/deploy-trigger?repo=${{ github.repository }}" || true
             elif command -v wget >/dev/null 2>&1; then
-              wget --post-data='{"sha":"${{ github.sha }}"}' --header='Content-Type: application/json' -O- "%s/api/v1/projects/deploy-trigger?repo=${{ github.repository }}"
+              wget -q --post-data='{"sha":"${{ github.sha }}"}' --header='Content-Type: application/json' -O- "%s/api/v1/projects/deploy-trigger?repo=${{ github.repository }}" || true
             else
               echo "Error: Neither curl nor wget found on the target VPS. Cannot trigger deployment."
               exit 1
@@ -1326,4 +1326,248 @@ func cleanProjectName(name string) string {
 		res = "app"
 	}
 	return res
+}
+
+// HandleControlProject processes start, stop, or restart container requests
+func (ctx *ServerContext) HandleControlProject(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid project ID"})
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"` // "start", "stop", "restart"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request payload"})
+		return
+	}
+
+	if req.Action != "start" && req.Action != "stop" && req.Action != "restart" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid action; must be start, stop, or restart"})
+		return
+	}
+
+	proj, err := ctx.Store.GetProject(id)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Project not found"})
+		return
+	}
+
+	if proj.ActivePort == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Project has no active deployment to control"})
+		return
+	}
+
+	srv, err := ctx.Store.GetServer(proj.ServerID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to load project server details"})
+		return
+	}
+
+	sshClient, err := connectSSHClient(srv.IPAddress, srv.SSHPort, srv.SSHUser, "key", "", srv.SSHPrivateKey)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to connect to VPS: " + err.Error()})
+		return
+	}
+	defer sshClient.Close()
+
+	cleanProjName := cleanProjectName(proj.ProjectName)
+	containerName := fmt.Sprintf("shipdude-%s-%d", cleanProjName, proj.ActivePort)
+	cmd := fmt.Sprintf("docker %s %s", req.Action, containerName)
+
+	var outputLines []string
+	err = internalssh.RunCommandStream(sshClient, cmd, func(line string) {
+		outputLines = append(outputLines, line)
+	})
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to %s container: %s", req.Action, err.Error())})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"action": req.Action,
+		"output": strings.Join(outputLines, "\n"),
+	})
+}
+
+// HandleProjectTelemetryStream streams CPU and memory usage of a project container using WebSockets
+func (ctx *ServerContext) HandleProjectTelemetryStream(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		_ = conn.WriteJSON(map[string]string{"error": "Invalid project ID"})
+		return
+	}
+
+	proj, err := ctx.Store.GetProject(id)
+	if err != nil {
+		_ = conn.WriteJSON(map[string]string{"error": "Project not found"})
+		return
+	}
+
+	if proj.ActivePort == 0 {
+		_ = conn.WriteJSON(map[string]interface{}{"online": false, "error": "No active deployment"})
+		return
+	}
+
+	srv, err := ctx.Store.GetServer(proj.ServerID)
+	if err != nil {
+		_ = conn.WriteJSON(map[string]string{"error": "Failed to load project server details"})
+		return
+	}
+
+	sshClient, err := connectSSHClient(srv.IPAddress, srv.SSHPort, srv.SSHUser, "key", "", srv.SSHPrivateKey)
+	if err != nil {
+		_ = conn.WriteJSON(map[string]string{"error": "Failed to connect to VPS via SSH"})
+		return
+	}
+	defer sshClient.Close()
+
+	cleanProjName := cleanProjectName(proj.ProjectName)
+	containerName := fmt.Sprintf("shipdude-%s-%d", cleanProjName, proj.ActivePort)
+
+	// Every 2 seconds, run docker stats
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			// Check if container is running first
+			var isRunning bool
+			checkCmd := fmt.Sprintf("docker ps --filter 'name=%s' --filter 'status=running' --format '{{.Names}}'", containerName)
+			_ = internalssh.RunCommandStream(sshClient, checkCmd, func(line string) {
+				if strings.TrimSpace(line) == containerName {
+					isRunning = true
+				}
+			})
+
+			if !isRunning {
+				err = conn.WriteJSON(map[string]interface{}{
+					"online": false,
+				})
+				if err != nil {
+					return
+				}
+				continue
+			}
+
+			// Container is running, fetch stats
+			statsCmd := fmt.Sprintf("docker stats --no-stream --format '{{.CPUPerc}};{{.MemUsage}};{{.MemPerc}}' %s", containerName)
+			var statsLine string
+			_ = internalssh.RunCommandStream(sshClient, statsCmd, func(line string) {
+				statsLine = strings.TrimSpace(line)
+			})
+
+			if statsLine == "" {
+				_ = conn.WriteJSON(map[string]interface{}{"online": false})
+				continue
+			}
+
+			parts := strings.Split(statsLine, ";")
+			if len(parts) < 3 {
+				_ = conn.WriteJSON(map[string]interface{}{"online": false})
+				continue
+			}
+
+			cpuPerc := strings.TrimSuffix(parts[0], "%")
+			memUsage := parts[1]
+			memPerc := strings.TrimSuffix(parts[2], "%")
+
+			err = conn.WriteJSON(map[string]interface{}{
+				"online":    true,
+				"cpu_perc":  cpuPerc,
+				"mem_usage": memUsage,
+				"mem_perc":  memPerc,
+			})
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+// HandleProjectContainerLogsStream streams docker container logs live using WebSockets
+func (ctx *ServerContext) HandleProjectContainerLogsStream(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return
+	}
+
+	proj, err := ctx.Store.GetProject(id)
+	if err != nil {
+		return
+	}
+
+	if proj.ActivePort == 0 {
+		return
+	}
+
+	srv, err := ctx.Store.GetServer(proj.ServerID)
+	if err != nil {
+		return
+	}
+
+	sshClient, err := connectSSHClient(srv.IPAddress, srv.SSHPort, srv.SSHUser, "key", "", srv.SSHPrivateKey)
+	if err != nil {
+		return
+	}
+	defer sshClient.Close()
+
+	cleanProjName := cleanProjectName(proj.ProjectName)
+	containerName := fmt.Sprintf("shipdude-%s-%d", cleanProjName, proj.ActivePort)
+
+	// Run docker logs -f
+	logsCmd := fmt.Sprintf("docker logs -f --tail 100 %s", containerName)
+	
+	cancelChan := make(chan struct{})
+	
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				close(cancelChan)
+				return
+			}
+		}
+	}()
+
+	go func() {
+		<-cancelChan
+		sshClient.Close()
+	}()
+
+	_ = internalssh.RunCommandStream(sshClient, logsCmd, func(line string) {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(line))
+	})
 }

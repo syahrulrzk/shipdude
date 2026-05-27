@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -55,6 +56,9 @@ func startMockSSHServer(t *testing.T, hostKey ssh.Signer, user string, password 
 				return nil, nil
 			}
 			return nil, fmt.Errorf("auth failed")
+		},
+		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			return nil, nil
 		},
 	}
 	config.AddHostKey(hostKey)
@@ -109,6 +113,12 @@ func startMockSSHServer(t *testing.T, hostKey ssh.Signer, user string, password 
 									ch.Write([]byte("1001\n"))
 								} else if strings.Contains(cmd, "docker ps -a --filter 'name=shipdude-caddy'") {
 									ch.Write([]byte("shipdude-caddy\n"))
+								} else if strings.Contains(cmd, "docker ps --filter 'name=") {
+									ch.Write([]byte("shipdude-my-website-8080\n"))
+								} else if strings.Contains(cmd, "docker stats") {
+									ch.Write([]byte("12.5%;120MB / 2.048GB;5.8%\n"))
+								} else if strings.Contains(cmd, "docker logs") {
+									ch.Write([]byte("2026-05-26 21:40:02 [INFO] Listening for HTTP requests on port 8080\n"))
 								} else if strings.Contains(cmd, "sudo -n true") {
 									// exit status 0 (no response body needed)
 								}
@@ -877,6 +887,175 @@ func TestHandleDeleteProject(t *testing.T) {
 	_, err := store.GetProject(projID)
 	if err == nil {
 		t.Fatal("expected project to be deleted from database, but it was found")
+	}
+}
+
+func TestHandleControlProject(t *testing.T) {
+	// 1. Setup mock SSH server
+	hostKey := generateTestHostKey(t)
+	sshAddr, sshServer := startMockSSHServer(t, hostKey, "deployer", "mypassword")
+	defer sshServer.Close()
+
+	sshHost, sshPortStr, _ := net.SplitHostPort(sshAddr)
+	var sshPort int
+	fmt.Sscanf(sshPortStr, "%d", &sshPort)
+
+	// 2. Initialize SQLite store
+	tmpDir, _ := os.MkdirTemp("", "shipdude-control-test")
+	defer os.RemoveAll(tmpDir)
+	store, _ := db.NewStore(filepath.Join(tmpDir, "shipdude.db"))
+	defer store.Close()
+
+	privKey, _, _ := generateSSHKeyPair()
+	srvID, _ := store.SaveServer(db.Server{
+		Name:          "127.0.0.1",
+		IPAddress:     sshHost,
+		SSHPort:       sshPort,
+		SSHUser:       "deployer",
+		SSHPrivateKey: privKey,
+	})
+	projID, _ := store.SaveProject(db.Project{
+		ServerID:    srvID,
+		ProjectName: "my-website",
+		ActivePort:  8080,
+	})
+
+	ctx := NewServerContext(store)
+	r := chi.NewRouter()
+	r.Post("/api/v1/projects/{id}/control", ctx.HandleControlProject)
+
+	// Test control restart
+	payload := map[string]string{"action": "restart"}
+	bodyBytes, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/projects/%d/control", projID), bytes.NewBuffer(bodyBytes))
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var res map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &res)
+	if res["status"] != "success" || res["action"] != "restart" {
+		t.Errorf("expected success restart, got: %v", res)
+	}
+}
+
+func TestHandleProjectTelemetryStream(t *testing.T) {
+	// 1. Setup mock SSH server
+	hostKey := generateTestHostKey(t)
+	sshAddr, sshServer := startMockSSHServer(t, hostKey, "deployer", "mypassword")
+	defer sshServer.Close()
+
+	sshHost, sshPortStr, _ := net.SplitHostPort(sshAddr)
+	var sshPort int
+	fmt.Sscanf(sshPortStr, "%d", &sshPort)
+
+	// 2. Initialize SQLite store
+	tmpDir, _ := os.MkdirTemp("", "shipdude-telemetry-test")
+	defer os.RemoveAll(tmpDir)
+	store, _ := db.NewStore(filepath.Join(tmpDir, "shipdude.db"))
+	defer store.Close()
+
+	privKey, _, _ := generateSSHKeyPair()
+	srvID, _ := store.SaveServer(db.Server{
+		Name:          "127.0.0.1",
+		IPAddress:     sshHost,
+		SSHPort:       sshPort,
+		SSHUser:       "deployer",
+		SSHPrivateKey: privKey,
+	})
+	projID, _ := store.SaveProject(db.Project{
+		ServerID:    srvID,
+		ProjectName: "my-website",
+		ActivePort:  8080,
+	})
+
+	ctx := NewServerContext(store)
+	r := chi.NewRouter()
+	r.Get("/api/v1/projects/{id}/telemetry", ctx.HandleProjectTelemetryStream)
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + fmt.Sprintf("/api/v1/projects/%d/telemetry", projID)
+	
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial websocket: %v", err)
+	}
+	defer ws.Close()
+
+	// Read one frame of stats
+	var msg map[string]interface{}
+	err = ws.ReadJSON(&msg)
+	if err != nil {
+		t.Fatalf("Failed to read JSON: %v", err)
+	}
+
+	if msg["online"] != true {
+		t.Errorf("Expected online true, got: %v", msg)
+	}
+	if msg["cpu_perc"] != "12.5" {
+		t.Errorf("Expected CPU 12.5, got: %v", msg["cpu_perc"])
+	}
+}
+
+func TestHandleProjectContainerLogsStream(t *testing.T) {
+	// 1. Setup mock SSH server
+	hostKey := generateTestHostKey(t)
+	sshAddr, sshServer := startMockSSHServer(t, hostKey, "deployer", "mypassword")
+	defer sshServer.Close()
+
+	sshHost, sshPortStr, _ := net.SplitHostPort(sshAddr)
+	var sshPort int
+	fmt.Sscanf(sshPortStr, "%d", &sshPort)
+
+	// 2. Initialize SQLite store
+	tmpDir, _ := os.MkdirTemp("", "shipdude-logs-test")
+	defer os.RemoveAll(tmpDir)
+	store, _ := db.NewStore(filepath.Join(tmpDir, "shipdude.db"))
+	defer store.Close()
+
+	privKey, _, _ := generateSSHKeyPair()
+	srvID, _ := store.SaveServer(db.Server{
+		Name:          "127.0.0.1",
+		IPAddress:     sshHost,
+		SSHPort:       sshPort,
+		SSHUser:       "deployer",
+		SSHPrivateKey: privKey,
+	})
+	projID, _ := store.SaveProject(db.Project{
+		ServerID:    srvID,
+		ProjectName: "my-website",
+		ActivePort:  8080,
+	})
+
+	ctx := NewServerContext(store)
+	r := chi.NewRouter()
+	r.Get("/api/v1/projects/{id}/container-logs", ctx.HandleProjectContainerLogsStream)
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + fmt.Sprintf("/api/v1/projects/%d/container-logs", projID)
+	
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial websocket: %v", err)
+	}
+	defer ws.Close()
+
+	_, message, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read message: %v", err)
+	}
+
+	expectedLog := "2026-05-26 21:40:02 [INFO] Listening for HTTP requests on port 8080"
+	if !strings.Contains(string(message), expectedLog) {
+		t.Errorf("Expected logs to contain %q, got %q", expectedLog, string(message))
 	}
 }
 

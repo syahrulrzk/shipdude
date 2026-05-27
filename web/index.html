@@ -257,6 +257,12 @@
                 <h2 class="text-xl font-semibold tracking-tight">Configure Deployment & Setup Auto CI/CD</h2>
             </div>
             
+            <!-- Localhost Webhook Tunnel Warning Banner -->
+            <div id="localhost-webhook-warning" class="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs hidden space-y-1">
+                <p class="font-bold">⚠️ Local Host Detected:</p>
+                <p class="text-slate-300">Since ShipDude is running locally, GitHub Actions needs a tunnel (like ngrok) to trigger deployment callbacks. If you deploy now, please ensure your webhook or callback URL is accessible, or consider running ShipDude directly on a public VPS.</p>
+            </div>
+            
             <form id="deploy-form" onsubmit="event.preventDefault(); triggerDeploy();" class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <!-- Left Column: Copy values / details -->
                 <div class="space-y-5">
@@ -379,6 +385,77 @@
             <!-- Terminal Content -->
             <div id="terminal-content" class="flex-1 p-6 overflow-y-auto font-mono text-xs text-emerald-400 space-y-1.5 bg-black scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                 <div class="text-slate-500">// Terminal stream initialized. Waiting for input...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monitoring Modal -->
+    <div id="monitoring-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm hidden">
+        <div class="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden m-4">
+            <!-- Header -->
+            <div class="px-6 py-5 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">📊</span>
+                    <div>
+                        <h3 class="text-md font-bold text-slate-100" id="monitor-title">Project Telemetry</h3>
+                        <p class="text-xs text-slate-400 mt-0.5" id="monitor-subtitle">Monitoring container resource metrics and stdout logs</p>
+                    </div>
+                </div>
+                <button onclick="closeMonitoringModal()" class="text-slate-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 w-8 h-8 rounded-full flex items-center justify-center font-bold">✕</button>
+            </div>
+            
+            <!-- Content -->
+            <div class="p-6 overflow-y-auto space-y-6 flex-1">
+                <!-- Resource Telemetry Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white/[0.01] border border-white/5 rounded-2xl p-5">
+                    <!-- CPU -->
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider">CPU Usage</span>
+                            <span class="text-sm font-mono font-bold text-blue-400" id="monitor-cpu-perc">0.0%</span>
+                        </div>
+                        <div class="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-white/5">
+                            <div id="monitor-cpu-bar" class="bg-gradient-to-r from-blue-500 to-blue-400 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Memory -->
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Memory Usage</span>
+                            <span class="text-sm font-mono font-bold text-purple-400" id="monitor-mem-perc">0MB / 0MB (0.0%)</span>
+                        </div>
+                        <div class="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-white/5">
+                            <div id="monitor-mem-bar" class="bg-gradient-to-r from-purple-500 to-purple-400 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="flex items-center justify-between bg-white/[0.01] border border-white/5 rounded-2xl p-4">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" id="monitor-status-dot"></span>
+                        <span class="text-xs text-slate-300 font-semibold uppercase tracking-wider" id="monitor-status-text">Status: Online</span>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="controlContainer('restart')" id="ctrl-restart-btn" class="px-4 py-2 text-xs font-semibold bg-blue-500/10 hover:bg-blue-500 border border-blue-500/20 hover:border-transparent text-blue-400 hover:text-white rounded-xl transition-all duration-300 active:scale-95 flex items-center gap-1.5 shadow-md shadow-blue-500/5">
+                            🔄 Restart Container
+                        </button>
+                        <button onclick="controlContainer('toggle')" id="ctrl-toggle-btn" class="px-4 py-2 text-xs font-semibold bg-rose-500/10 hover:bg-rose-500 border border-rose-500/20 hover:border-transparent text-rose-400 hover:text-white rounded-xl transition-all duration-300 active:scale-95 flex items-center gap-1.5 shadow-md shadow-rose-500/5">
+                            🛑 Stop Container
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Live Container Logs -->
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Live stdout/stderr stream</h4>
+                        <span class="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded font-mono">WS Live</span>
+                    </div>
+                    <div id="monitor-logs" class="bg-slate-950/80 border border-white/5 rounded-2xl p-5 font-mono text-xs text-slate-300 leading-relaxed h-72 overflow-y-auto space-y-1">
+                        <div class="text-slate-500">// Connecting to container log stream...</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -44,12 +44,15 @@ func SetupRouter(staticHandler http.Handler, dbStore *db.Store) *chi.Mux {
 		r.Post("/vps/provision", ctx.HandleProvisionVPS)
 		r.Get("/vps/provision/logs", ctx.HandleProvisionLogsStream)
 
-		// Deployment Triggers & Rollbacks
+		// Deployment Triggers & Rollbacks & Monitoring
 		r.Post("/projects/deploy-trigger", ctx.HandleDeployTrigger)
 		r.Get("/projects/{id}/logs", ctx.HandleProjectLogsStream)
 		r.Post("/projects/{id}/rollback", ctx.HandleRollbackProject)
 		r.Delete("/projects/{id}", ctx.HandleDeleteProject)
 		r.Get("/projects", ctx.HandleListProjects)
+		r.Post("/projects/{id}/control", ctx.HandleControlProject)
+		r.Get("/projects/{id}/telemetry", ctx.HandleProjectTelemetryStream)
+		r.Get("/projects/{id}/container-logs", ctx.HandleProjectContainerLogsStream)
 	})
 
 	// Serve Static Files for Frontend SPA

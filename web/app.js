@@ -4,12 +4,24 @@ let detectedStackInfo = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    checkLocalhostWebhookWarning();
     checkSettings();
     loadLastVPSConnection();
     setupPrivateKeyMasking('private_key');
     setupPrivateKeyMasking('deploy_private_key');
     loadProjects();
 });
+
+function checkLocalhostWebhookWarning() {
+    const hostname = window.location.hostname;
+    const warningBanner = document.getElementById('localhost-webhook-warning');
+    if (!warningBanner) return;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.')) {
+        warningBanner.classList.remove('hidden');
+    } else {
+        warningBanner.classList.add('hidden');
+    }
+}
 
 function toggleAuthFields() {
     const authMethod = document.getElementById('auth_method').value;
@@ -791,6 +803,11 @@ async function loadProjects() {
                         </button>
                     </div>
                     
+                    ${p.active_port ? `
+                    <button onclick="openMonitoring(${p.id}, '${p.project_name}')" class="w-full bg-gradient-to-r from-blue-500/10 to-purple-500/10 hover:from-blue-500/20 hover:to-purple-500/20 hover:border-blue-500/30 border border-blue-500/10 text-slate-200 hover:text-white text-xs font-semibold py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95">
+                        📊 Open Monitoring Dashboard
+                    </button>
+                    ` : ''}
                     <button onclick="openTerminal('project', ${p.id})" class="w-full bg-white/5 hover:bg-white/10 active:scale-95 text-slate-300 hover:text-white text-xs font-semibold py-2.5 rounded-xl border border-white/5 transition-all flex items-center justify-center gap-1.5 shadow-md">
                         📺 Open Execution Logs Console
                     </button>
@@ -983,4 +1000,157 @@ function appendTerminalLine(text) {
 
     // Keep it scrolled to bottom
     content.scrollTop = content.scrollHeight;
+}
+
+let monitorTelemetryWs = null;
+let monitorLogsWs = null;
+let activeMonitorProjectId = null;
+let containerIsOnline = false;
+
+function openMonitoring(projectId, projectName) {
+    activeMonitorProjectId = projectId;
+    const modal = document.getElementById('monitoring-modal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+    document.getElementById('monitor-title').textContent = `Project Monitoring: ${projectName}`;
+    
+    // Reset fields
+    document.getElementById('monitor-cpu-perc').textContent = '0.0%';
+    document.getElementById('monitor-cpu-bar').style.width = '0%';
+    document.getElementById('monitor-mem-perc').textContent = '0MB / 0MB (0.0%)';
+    document.getElementById('monitor-mem-bar').style.width = '0%';
+    
+    const logsContainer = document.getElementById('monitor-logs');
+    logsContainer.innerHTML = '<div class="text-slate-500">// Connecting to container log stream...</div>';
+
+    // Status fields
+    const dot = document.getElementById('monitor-status-dot');
+    const text = document.getElementById('monitor-status-text');
+    dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500 animate-pulse';
+    text.textContent = 'Status: Connecting...';
+
+    // Disconnect old sockets
+    if (monitorTelemetryWs) monitorTelemetryWs.close();
+    if (monitorLogsWs) monitorLogsWs.close();
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    
+    // 1. Telemetry connection
+    const telemetryUrl = `${proto}//${window.location.host}/api/v1/projects/${projectId}/telemetry`;
+    monitorTelemetryWs = new WebSocket(telemetryUrl);
+    
+    monitorTelemetryWs.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.online) {
+                containerIsOnline = true;
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+                text.textContent = 'Status: Online';
+                
+                // Stop button styling
+                const toggleBtn = document.getElementById('ctrl-toggle-btn');
+                toggleBtn.textContent = '🛑 Stop Container';
+                toggleBtn.className = 'px-4 py-2 text-xs font-semibold bg-rose-500/10 hover:bg-rose-500 border border-rose-500/20 hover:border-transparent text-rose-400 hover:text-white rounded-xl transition-all duration-300 active:scale-95 flex items-center gap-1.5 shadow-md shadow-rose-500/5';
+                
+                // Update stats
+                document.getElementById('monitor-cpu-perc').textContent = data.cpu_perc + '%';
+                document.getElementById('monitor-cpu-bar').style.width = Math.min(100, parseFloat(data.cpu_perc) || 0) + '%';
+                
+                document.getElementById('monitor-mem-perc').textContent = `${data.mem_usage} (${data.mem_perc}%)`;
+                document.getElementById('monitor-mem-bar').style.width = Math.min(100, parseFloat(data.mem_perc) || 0) + '%';
+            } else {
+                containerIsOnline = false;
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+                text.textContent = 'Status: Offline';
+                
+                // Start button styling
+                const toggleBtn = document.getElementById('ctrl-toggle-btn');
+                toggleBtn.textContent = '▶️ Start Container';
+                toggleBtn.className = 'px-4 py-2 text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500 border border-emerald-500/20 hover:border-transparent text-emerald-400 hover:text-white rounded-xl transition-all duration-300 active:scale-95 flex items-center gap-1.5 shadow-md shadow-emerald-500/5';
+                
+                // Clear stats
+                document.getElementById('monitor-cpu-perc').textContent = '0.0%';
+                document.getElementById('monitor-cpu-bar').style.width = '0%';
+                document.getElementById('monitor-mem-perc').textContent = 'Offline';
+                document.getElementById('monitor-mem-bar').style.width = '0%';
+            }
+        } catch (e) {
+            console.error('Failed to parse telemetry frame', e);
+        }
+    };
+    
+    // 2. Logs connection
+    const logsUrl = `${proto}//${window.location.host}/api/v1/projects/${projectId}/container-logs`;
+    monitorLogsWs = new WebSocket(logsUrl);
+    
+    monitorLogsWs.onopen = () => {
+        logsContainer.innerHTML = '<div class="text-emerald-500 font-semibold">// Live log stream connected...</div>';
+    };
+    
+    monitorLogsWs.onmessage = (event) => {
+        const line = document.createElement('div');
+        line.textContent = event.data;
+        logsContainer.appendChild(line);
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    };
+    
+    monitorLogsWs.onclose = () => {
+        const line = document.createElement('div');
+        line.className = 'text-amber-500 font-semibold';
+        line.textContent = '// Log stream disconnected.';
+        logsContainer.appendChild(line);
+    };
+}
+
+function closeMonitoringModal() {
+    const modal = document.getElementById('monitoring-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+    if (monitorTelemetryWs) {
+        monitorTelemetryWs.close();
+        monitorTelemetryWs = null;
+    }
+    if (monitorLogsWs) {
+        monitorLogsWs.close();
+        monitorLogsWs = null;
+    }
+    activeMonitorProjectId = null;
+}
+
+async function controlContainer(action) {
+    if (!activeMonitorProjectId) return;
+    
+    let targetAction = action;
+    if (action === 'toggle') {
+        targetAction = containerIsOnline ? 'stop' : 'start';
+    }
+    
+    const btn = targetAction === 'restart' ? document.getElementById('ctrl-restart-btn') : document.getElementById('ctrl-toggle-btn');
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+    
+    showToast(`Sending ${targetAction} command to target VPS...`, 'info');
+    
+    try {
+        const response = await fetch(`/api/v1/projects/${activeMonitorProjectId}/control`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: targetAction })
+        });
+        
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || `Failed to ${targetAction} container`);
+        }
+        
+        showToast(`Container ${targetAction} completed successfully!`, 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+    }
 }
